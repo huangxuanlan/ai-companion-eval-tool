@@ -1,0 +1,1963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>体验中心 - 长文多轮验证工具</title>
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f6feb'/%3E%3Cpath d='M18 20h28v6H18zm0 12h20v6H18zm0 12h28v6H18z' fill='white'/%3E%3C/svg%3E">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="vendor/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="css/main.css?v=91">
+
+</head>
+
+<body>
+  <!-- 左侧导航栏 -->
+  <aside class="sidebar" id="sidebar" role="navigation" aria-label="主导航">
+    <div class="sidebar-header">
+      <button class="toggle-btn" id="toggleSidebar" aria-expanded="true" aria-controls="sidebar" aria-label="切换侧边栏"><svg
+          viewBox="0 0 24 24" class="icon">
+          <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+        </svg></button>
+      <span class="sidebar-title" style="margin-left:8px">长文验证工具</span>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">功能导航</div>
+      <a class="nav-item active" data-page="chat" data-tooltip="对话体验" role="button" tabindex="0" aria-current="page"
+        onclick="switchPage('chat')" onkeydown="if(event.key==='Enter')switchPage('chat')"><svg viewBox="0 0 24 24"
+          class="icon" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg><span class="nav-text">对话体验</span></a>
+      <a class="nav-item" data-page="test-center" data-tooltip="测试中心" role="button" tabindex="0"
+        onclick="switchPage('test-center')" onkeydown="if(event.key==='Enter')switchPage('test-center')"><svg
+          viewBox="0 0 24 24" class="icon" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+        </svg><span class="nav-text">测试中心</span></a>
+      <a class="nav-item" data-page="prompts" data-tooltip="提示词管理" role="button" tabindex="0"
+        onclick="switchPage('prompts')" onkeydown="if(event.key==='Enter')switchPage('prompts')"><svg
+          viewBox="0 0 24 24" class="icon" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg><span class="nav-text">提示词管理</span></a>
+      <a class="nav-item" data-page="history" data-tooltip="历史记录" role="button" tabindex="0"
+        onclick="switchPage('history')" onkeydown="if(event.key==='Enter')switchPage('history')"><svg
+          viewBox="0 0 24 24" class="icon" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg><span class="nav-text">历史记录</span></a>
+    </div>
+    <div class="nav-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <div class="nav-label">最近对话</div>
+      <div class="history-list" id="sidebar-history"></div>
+    </div>
+  </aside>
+
+  <!-- 中间工作区 -->
+  <main class="main-workspace">
+    <header class="workspace-header">
+      <div class="header-left">
+        <div id="header-model-shell" class="header-model-shell" title="点击选择全局主模型">
+          <div id="header-model-picker"></div>
+          <button class="btn btn-secondary header-model-settings-btn" id="btn-header-model-settings" type="button"
+            title="编辑当前模型的 Prompt 与多样性" onclick="openHeaderModelSettings()">⚙️ Prompt &amp; 多样性</button>
+          <select id="header-global-model" style="display:none">
+            <option value="">等待加载模型...</option>
+          </select>
+        </div>
+      </div>
+      <div class="header-right" style="display:flex;align-items:center;gap:8px">
+        <div id="chat-top-tools" style="display:flex;gap:8px">
+          <button class="btn btn-secondary" id="btn-clear-chat" title="清除上下文" style="padding:6px"
+            onclick="confirmClearChatContext()">🗑️</button>
+          <button class="btn btn-secondary" id="btn-toggle-compare" title="模型对比" style="padding:6px"
+            onclick="toggleCompareMode()">⇄</button>
+          <button class="btn btn-secondary" id="btn-new-chat" title="新建会话" style="padding:6px"
+            onclick="handleNewChatSession()">➕</button>
+        </div>
+        <button class="action-btn" id="togglePanelBtn"><svg viewBox="0 0 24 24" class="icon" fill="none"
+            stroke="currentColor" stroke-width="2">
+            <line x1="4" y1="21" x2="4" y2="14" />
+            <line x1="4" y1="10" x2="4" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12" y2="3" />
+            <line x1="20" y1="21" x2="20" y2="16" />
+            <line x1="20" y1="12" x2="20" y2="3" />
+          </svg> 配置面板</button>
+      </div>
+    </header>
+
+    <!-- P1: 对话页 -->
+    <section id="page-chat" class="page active" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <div id="chat-progress" class="chat-progress chat-shell-row">
+        <span class="chat-progress-text" id="chat-progress-text">Turn 0/0</span>
+        <div class="chat-progress-bar">
+          <div class="chat-progress-fill" id="chat-progress-fill"></div>
+        </div>
+        <span class="chat-progress-pct" id="chat-progress-pct">0%</span>
+        <span id="chat-status-text" style="font-size:12px;color:var(--text-tertiary)">就绪</span>
+      </div>
+      <div id="chat-control-row" class="chat-shell-row" style="display:none;gap:8px">
+        <button class="btn btn-secondary" id="btn-chat-pause" type="button"
+          style="justify-content:center" onclick="pauseActiveConversation()">⏸ 暂停</button>
+        <button class="btn btn-secondary" id="btn-chat-resume" type="button"
+          style="display:none;justify-content:center" onclick="resumeActiveConversation()">▶ 继续</button>
+        <button class="btn btn-danger" id="btn-chat-cancel" type="button"
+          style="justify-content:center" onclick="cancelActiveConversation()">⏹ 取消</button>
+      </div>
+      <div class="chat-container" id="chat-area">
+        <div class="empty-state" id="chat-empty">
+          <div class="title">欢迎来到长文验证工具</div>
+          <p>在右侧面板选择预设角色，配置参数后开始测试</p>
+          <button class="btn btn-primary" style="margin-top:16px"
+            onclick="openRightPanel()">打开配置面板</button>
+        </div>
+      </div>
+      <div id="chat-typing" class="typing-indicator chat-shell-inline" style="display:none">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <span id="chat-typing-text">请求已发送</span>
+      </div>
+      <div class="btn-group chat-shell-row chat-actions-row" id="chat-nav" style="display:none">
+        <button class="btn btn-secondary" id="btn-view-msgs">📋 查看调试详情</button>
+        <button class="btn btn-secondary" id="btn-export-excel">📥 导出 Excel</button>
+        <button class="btn btn-primary" id="btn-score-conv" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">⭐
+          一键打分</button>
+      </div>
+      <!-- 对话输入框 -->
+      <div class="input-dock chat-shell-row" id="chat-input-dock">
+        <div class="input-wrapper">
+          <textarea id="chat-input" placeholder="输入消息..."
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text-secondary)">
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="f-web-search-chat"> ⊕联网
+              </label>
+              <label style="display:flex;align-items:center;gap:4px">🧠
+                <select id="f-thinking-effort-chat"
+                  onchange="onChatThinkingEffortChange()"
+                  style="font-size:12px;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-surface)">
+                  <option value="disabled">关闭</option>
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high" selected>高</option>
+                </select>
+              </label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="f-auto-score-chat" checked aria-label="自动AI打分开关"> ⭐自动AI打分
+              </label>
+            </div>
+            <button class="btn btn-primary send-fab" id="btn-chat-send" type="button" aria-label="发送消息"
+              title="发送消息" onclick="sendChatMessage()">↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- P-freechat: 火山方舟风格列式模型对比 -->
+    <section id="page-freechat" class="page" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div
+        style="padding:10px 24px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:0;background:var(--bg-surface)">
+        <div style="font-weight:600;font-size:13px;color:var(--text-secondary);margin-right:16px;white-space:nowrap">⚡
+          模型对比</div>
+        <div id="freechat-model-slots" style="display:flex;flex:1;gap:0"></div>
+        <button class="btn btn-secondary" id="btn-add-model-slot" onclick="addModelSlot()"
+          style="font-size:12px;padding:4px 14px;white-space:nowrap;margin-left:12px">+ 添加模型</button>
+      </div>
+      <div id="freechat-area" class="chat-container"
+        style="flex:1;overflow-y:auto;padding:24px 8%;display:flex;flex-direction:column;gap:16px">
+        <div class="empty-state" id="freechat-empty">
+          <div class="title">自由聊天</div>
+          <p>选择 1-3 个模型，发送消息查看多模型并行输出对比。</p>
+        </div>
+      </div>
+      <div style="padding:8px 8%;border-top:1px solid var(--border-light);display:flex;align-items:center;gap:12px">
+        <button class="btn btn-secondary" id="btn-web-search"
+          style="font-size:12px;padding:4px 10px;border-radius:16px;transition:all .2s" onclick="toggleWebSearch()"
+          title="联网搜索">⊕ 联网</button>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:12px;color:var(--text-tertiary)">思考:</span>
+          <select id="sel-thinking" class="form-control" style="width:72px;height:26px;font-size:12px;padding:2px 6px"
+            onchange="onThinkingChange()">
+            <option value="disabled">关闭</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high" selected>高</option>
+          </select>
+        </div>
+      </div>
+      <div style="padding:4px 8% 12px;display:flex;gap:8px">
+        <textarea id="freechat-input" class="form-control"
+          style="flex:1;min-height:44px;max-height:120px;resize:vertical;font-family:var(--font)"
+          placeholder="输入消息..."></textarea>
+        <button class="btn btn-primary" id="btn-freechat-send" style="padding:0 24px"
+          onclick="sendFreeChat()">发送</button>
+        <button class="btn btn-secondary" onclick="clearFreeChat()" title="清空对话">🗑️</button>
+      </div>
+      <div id="freechat-report-actions"
+        style="display:none;padding:0 8% 16px;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="freechat-report-hint" style="font-size:12px;color:var(--text-secondary)">
+          完成至少 3 轮模型对比后，可生成汇总报告并跳转到历史记录页查看。
+        </div>
+        <button class="btn btn-primary" type="button" id="btn-freechat-generate-report"
+          onclick="generateFreeChatCompareReport()" disabled>📊 生成对比报告</button>
+      </div>
+    </section>
+
+    <!-- P-freechat: 独立 Prompt 编辑弹窗 -->
+    <div id="modal-freechat-prompt" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="freechat-prompt-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div
+        style="background:var(--bg-surface);width:90%;max-width:1120px;border-radius:12px;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+        <div
+          style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0;font-weight:600" id="freechat-prompt-title">⚙️ 编辑 System Prompt</h3>
+          <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+            onclick="closeModal('modal-freechat-prompt')">×</button>
+        </div>
+        <div class="runtime-prompt-editor-body">
+          <div class="runtime-prompt-editor-layout">
+            <div class="runtime-prompt-editor-main">
+              <div style="margin-bottom:12px;font-size:13px;color:var(--text-secondary)">为该模型独立指定 System
+                Prompt。留空则表示使用默认对话流的上下文。</div>
+              <textarea id="freechat-prompt-editor" class="form-control runtime-prompt-editor-textarea"
+                style="font-family:var(--font)"
+                placeholder="输入专属 System Prompt... (仅对当前模型生效)"></textarea>
+            </div>
+            <aside class="prompt-editor-aside">
+              <section class="prompt-editor-sidebar-section">
+                <div class="prompt-editor-section-title">生成多样性</div>
+                <div class="generation-card compact">
+                  <div class="generation-preset-tabs" role="tablist" aria-label="模型对比生成多样性预设">
+                    <button type="button" id="fc-btn-generation-preset-precise" class="generation-preset-btn"
+                      onclick="setFreeChatGenerationPreset('precise')">精准模式</button>
+                    <button type="button" id="fc-btn-generation-preset-balanced" class="generation-preset-btn"
+                      onclick="setFreeChatGenerationPreset('balanced')">平衡模式</button>
+                    <button type="button" id="fc-btn-generation-preset-creative" class="generation-preset-btn"
+                      onclick="setFreeChatGenerationPreset('creative')">创意模式</button>
+                    <button type="button" id="fc-btn-generation-preset-custom" class="generation-preset-btn"
+                      onclick="setFreeChatGenerationPreset('custom')">自定义</button>
+                  </div>
+                  <div class="generation-slider-row">
+                    <label class="form-label generation-slider-label" for="fc-temperature">生成随机性
+                      <span class="generation-help" title="值越高越发散，值越低越稳定。">ⓘ</span>
+                    </label>
+                    <div class="generation-slider-control">
+                      <input type="range" id="fc-temperature-range" class="generation-range" min="0" max="2" step="0.05"
+                        value="1" oninput="syncFreeChatGenerationField('temperature', this.value, 'range')">
+                      <div class="generation-number-group">
+                        <input type="number" id="fc-temperature" class="form-control generation-number-input" min="0"
+                          max="2" step="0.05" value="1" oninput="syncFreeChatGenerationField('temperature', this.value, 'number')">
+                        <button type="button" class="generation-adjust-btn" onclick="adjustFreeChatGenerationField('temperature', -0.05)">-</button>
+                        <button type="button" class="generation-adjust-btn" onclick="adjustFreeChatGenerationField('temperature', 0.05)">+</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="generation-slider-row">
+                    <label class="form-label generation-slider-label" for="fc-top-p">Top P
+                      <span class="generation-help" title="控制采样范围，值越高越开放。">ⓘ</span>
+                    </label>
+                    <div class="generation-slider-control">
+                      <input type="range" id="fc-top-p-range" class="generation-range" min="0" max="1" step="0.05"
+                        value="0.95" oninput="syncFreeChatGenerationField('top_p', this.value, 'range')">
+                      <div class="generation-number-group">
+                        <input type="number" id="fc-top-p" class="form-control generation-number-input" min="0" max="1"
+                          step="0.05" value="0.95" oninput="syncFreeChatGenerationField('top_p', this.value, 'number')">
+                        <button type="button" class="generation-adjust-btn" onclick="adjustFreeChatGenerationField('top_p', -0.05)">-</button>
+                        <button type="button" class="generation-adjust-btn" onclick="adjustFreeChatGenerationField('top_p', 0.05)">+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="prompt-editor-sidebar-section">
+                <div class="prompt-editor-section-title">变量编辑</div>
+                <div id="freechat-prompt-vars-body" class="runtime-prompt-editor-vars-body"></div>
+              </section>
+            </aside>
+          </div>
+          <div class="runtime-prompt-editor-actions">
+            <button class="btn btn-secondary"
+              onclick="closeModal('modal-freechat-prompt')">取消</button>
+            <button class="btn btn-primary" onclick="saveFreeChatPrompt()">💾 保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P2: 打分可视化视图 (原 page-scoring，转为 Modal) -->
+    <div id="modal-scoring" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="modal-scoring-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div
+        style="background:var(--bg-surface);width:90%;max-width:900px;max-height:90vh;border-radius:12px;overflow-y:auto;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+        <div
+          style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg-surface);z-index:10;">
+          <h3 style="margin:0;font-weight:600" id="modal-scoring-title">⭐ 对话打分核查</h3>
+          <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+            onclick="closeModal('modal-scoring')">×</button>
+        </div>
+        <div style="padding:24px">
+          <div id="scoring-empty" class="empty-state">
+            <div class="title">暂无打分数据</div>
+            <p>需要先完成一次对话测试，然后点击「一键打分」。</p><button class="btn btn-primary" style="margin-top:16px"
+              onclick="closeModal('modal-scoring')">返回聊天页面</button>
+          </div>
+          <div id="scoring-content" style="display:none">
+            <div class="score-header">
+              <div class="score-big" id="score-avg">0.0</div>
+              <div style="font-size:14px;color:var(--text-secondary)">加权平均总分 / 10</div>
+              <div id="score-manual-avg" style="font-size:13px;color:var(--text-secondary);margin-top:6px">人工均分: -</div>
+            </div>
+            <div id="scoring-meta" class="scoring-meta" style="margin-bottom:16px;display:grid;gap:10px">
+              <div class="meta-chips" id="scoring-meta-chips"></div>
+              <div id="scoring-summary-block" class="summary-view" style="display:none">
+                <div class="summary-view-title">最新剧情摘要</div>
+                <div id="scoring-summary-text" class="summary-view-body"></div>
+              </div>
+            </div>
+            <div id="scoring-progress" style="display:none;margin-bottom:16px">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-secondary);margin-bottom:6px">
+                <span id="scoring-progress-text">正在打分...</span>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="scoring-progress-count">0/0</span>
+                  <span id="scoring-failed-badge" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:var(--danger-color,#ef4444);color:#fff;font-weight:600"></span>
+                </div>
+              </div>
+              <div class="score-progress-bar">
+                <div class="score-progress-fill" id="scoring-progress-fill" style="width:0%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;border:1px solid var(--border-light);border-radius:12px;background:var(--bg-hover)">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <label class="form-label" for="score-low-threshold" style="margin:0">低分阈值</label>
+                <input type="range" id="score-low-threshold" min="0" max="10" step="0.1" value="6.0" style="width:180px">
+                <span id="score-low-threshold-display" style="font-size:12px;color:var(--primary-color);font-weight:600">6.0</span>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-secondary" id="btn-next-low-score" type="button">⬇️ 下一个低分</button>
+                <button class="btn btn-secondary" id="btn-score-events" type="button">📜 查看评分日志</button>
+              </div>
+            </div>
+            <div class="score-layout">
+              <div class="radar-card"><svg id="radar-svg" viewBox="0 0 320 320"></svg>
+                <div style="margin-top:12px;font-size:13px;color:var(--text-tertiary)">五维质量雷达图</div>
+              </div>
+              <div class="score-cards" id="score-cards"></div>
+            </div>
+            <div class="btn-group" style="justify-content:center;margin-top:20px;flex-wrap:wrap;gap:8px">
+              <button class="btn btn-secondary" id="btn-rescore">🔄 重新全量打分</button>
+              <button class="btn btn-secondary" id="btn-retry-failed" style="border-color:var(--warning-color,#f59e0b);color:var(--warning-color,#f59e0b)">⚡ 重试失败/未完成项</button>
+              <button class="btn btn-secondary" id="btn-ai-summary" style="border-color:var(--primary-color,#6366f1);color:var(--primary-color,#6366f1)">🤖 AI生成摘要</button>
+              <button class="btn btn-secondary" id="btn-export-summary-scored">📥 导出评分摘要</button>
+              <button class="btn btn-primary" id="btn-export-scored">📥 导出完整评分</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 摘要报告弹窗 -->
+    <div id="modal-ai-summary" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="modal-ai-summary-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div style="background:var(--bg-surface);width:90%;max-width:760px;max-height:90vh;border-radius:12px;overflow-y:auto;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.15)">
+        <div style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg-surface);z-index:10;">
+          <h3 style="margin:0;font-weight:600" id="modal-ai-summary-title">🤖 AI 对话质量评估报告</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-secondary" id="ai-summary-download-btn" type="button" disabled>⬇️ 下载 .md</button>
+            <button class="btn btn-ghost" onclick="closeModal('modal-ai-summary')" aria-label="关闭">✕</button>
+          </div>
+        </div>
+        <div id="ai-summary-body" style="padding:24px;flex:1">
+          <div id="ai-summary-loading" style="text-align:center;padding:40px;color:var(--text-secondary)">
+            <div style="font-size:32px;margin-bottom:12px">⏳</div>
+            <div>AI 正在分析打分数据，请稍候...</div>
+          </div>
+          <div id="ai-summary-content" style="display:none">
+            <div id="ai-summary-meta" style="font-size:12px;color:var(--text-secondary);margin-bottom:12px"></div>
+            <pre id="ai-summary-markdown"
+              style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.75;background:var(--bg-hover);padding:16px;border-radius:10px;max-height:60vh;overflow:auto;margin:0"></pre>
+          </div>
+          <div id="ai-summary-error" style="display:none;text-align:center;padding:30px;color:var(--danger-color,#ef4444)">
+            <div style="font-size:28px;margin-bottom:10px">❌</div>
+            <div id="ai-summary-error-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase2-D: 批量测试完成摘要弹窗 -->
+    <div id="modal-batch-summary" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="modal-batch-summary-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div style="background:var(--bg-surface);width:90%;max-width:720px;max-height:90vh;border-radius:12px;overflow-y:auto;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+        <div style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg-surface);z-index:10;">
+          <h3 style="margin:0;font-weight:600" id="modal-batch-summary-title">📊 批量测试摘要</h3>
+          <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)" onclick="closeModal('modal-batch-summary')">×</button>
+        </div>
+        <div style="padding:24px;display:grid;gap:20px">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+            <div style="text-align:center;padding:14px;background:var(--bg-hover);border-radius:10px">
+              <div style="font-size:28px;font-weight:700;color:var(--primary-color)" id="bs-total">0</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px">会话总数</div>
+            </div>
+            <div style="text-align:center;padding:14px;background:var(--bg-hover);border-radius:10px">
+              <div style="font-size:28px;font-weight:700;color:var(--success-color)" id="bs-success">0</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px">成功</div>
+            </div>
+            <div style="text-align:center;padding:14px;background:var(--bg-hover);border-radius:10px">
+              <div style="font-size:28px;font-weight:700;color:var(--danger-color)" id="bs-failed">0</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px">失败</div>
+            </div>
+            <div style="text-align:center;padding:14px;background:var(--bg-hover);border-radius:10px">
+              <div style="font-size:28px;font-weight:700;color:var(--text-primary)" id="bs-duration">-</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px">总耗时</div>
+            </div>
+          </div>
+          <div style="text-align:center">
+            <div class="score-big" id="bs-avg-score">-</div>
+            <div style="font-size:14px;color:var(--text-secondary)">整体平均分 / 10</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px" id="bs-dim-cards"></div>
+          <div id="bs-distribution" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px"></div>
+          <div class="btn-group" style="justify-content:center;margin-top:8px">
+            <button class="btn btn-primary" id="btn-batch-export-all" onclick="exportBatchResults()">📥 导出全部结果</button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-batch-summary')">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P3: 消息调试视图 (原 page-debug，转为 Modal) -->
+    <div id="modal-debug" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="modal-debug-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div
+        style="background:var(--bg-surface);width:90%;max-width:900px;max-height:90vh;border-radius:12px;overflow-y:auto;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+        <div
+          style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg-surface);z-index:10;">
+          <h3 style="margin:0;font-weight:600" id="modal-debug-title">🐛 调试详情</h3>
+          <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+            onclick="closeModal('modal-debug')">×</button>
+        </div>
+        <div style="padding:24px">
+          <div id="debug-no-data" class="empty-state">
+            <div class="title">暂无调试数据</div>
+            <p>需要先运行一次对话测试。</p><button class="btn btn-primary" style="margin-top:16px"
+              onclick="closeModal('modal-debug')">返回</button>
+          </div>
+          <div id="debug-content" style="display:none">
+            <div class="debug-toolbar">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <span style="font-weight:600">轮次选择</span><select id="debug-turn-select" class="form-control"
+                  style="width:auto;min-width:120px"></select>
+              </div>
+              <div class="debug-toolbar-actions">
+                <div class="debug-view-tabs">
+                  <button type="button" class="debug-view-tab active" id="debug-tab-messages"
+                    onclick="switchDebugPanel('messages')">消息快照</button>
+                  <button type="button" class="debug-view-tab" id="debug-tab-request"
+                    onclick="switchDebugPanel('request')">完整请求 JSON</button>
+                </div>
+                <button class="btn btn-secondary" id="btn-copy-debug-json" type="button">复制 JSON</button>
+              </div>
+            </div>
+            <div id="debug-badges" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+            <div id="debug-view-messages" class="debug-view-panel active">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><span
+                  style="font-size:13px;color:var(--text-secondary)">Token 裁剪级别</span>
+                <div class="trim-bar" id="debug-trim-segments"></div><span class="trim-label"
+                  id="debug-trim-value">0/7</span>
+              </div>
+              <div class="msg-list" id="debug-msg-list"></div>
+            </div>
+            <div id="debug-view-request" class="debug-view-panel" style="display:none">
+              <div id="debug-request-meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+              <div id="debug-request-details" class="debug-request-sections"></div>
+              <pre id="debug-request-json" class="debug-json-pre"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P4: 历史记录页 -->
+    <section id="page-history" class="page" style="padding:24px 8%;overflow-y:auto">
+      <div id="history-empty" class="empty-state">
+        <div class="title">暂无历史对话</div>
+        <p>运行你的第一次测试吧！</p><button class="btn btn-primary" style="margin-top:16px"
+          onclick="switchPage('chat')">去对话测试</button>
+      </div>
+      <div id="history-content" style="display:none">
+        <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1.2fr 1fr 1fr 1fr 0.8fr 0.8fr auto auto auto;gap:8px;margin-bottom:16px">
+          <input type="text" id="history-filter-role" class="form-control" placeholder="按角色筛选">
+          <input type="text" id="history-filter-model" class="form-control" placeholder="按模型筛选">
+          <input type="text" id="history-filter-prompt" class="form-control" placeholder="按提示词筛选">
+          <select id="history-filter-status" class="form-control" title="按状态筛选">
+            <option value="">全部状态</option>
+            <option value="running">运行中</option>
+            <option value="queued">排队中</option>
+            <option value="paused">已暂停</option>
+            <option value="cancelled">已取消</option>
+            <option value="completed">已完成</option>
+            <option value="failed">已失败</option>
+            <option value="interrupted">已中断</option>
+          </select>
+          <input type="date" id="history-filter-date-from" class="form-control" title="开始日期">
+          <input type="date" id="history-filter-date-to" class="form-control" title="结束日期">
+          <input type="number" id="history-filter-score-min" class="form-control" min="0" max="10" step="0.1" placeholder="最低分">
+          <input type="number" id="history-filter-score-max" class="form-control" min="0" max="10" step="0.1" placeholder="最高分">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            <input type="checkbox" id="history-filter-include-archived"> 显示已归档
+          </label>
+          <button class="btn btn-secondary" type="button" onclick="applyHistoryFilters()">筛选</button>
+          <button class="btn btn-secondary" type="button" onclick="resetHistoryFilters()">重置</button>
+        </div>
+        <!-- 评分快速筛选 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text-secondary);flex-shrink:0">评分筛选:</span>
+          <button class="btn btn-secondary score-quick-filter-btn active" data-filter="" onclick="setScoreQuickFilter('')">全部</button>
+          <button class="btn btn-secondary score-quick-filter-btn" data-filter="scored" onclick="setScoreQuickFilter('scored')">✅ 已打分</button>
+          <button class="btn btn-secondary score-quick-filter-btn" data-filter="unscored" onclick="setScoreQuickFilter('unscored')">⬜ 未打分</button>
+          <button class="btn btn-secondary score-quick-filter-btn" data-filter="failed" onclick="setScoreQuickFilter('failed')">❌ 打分失败</button>
+        </div>
+        <div
+          style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:12px">
+          <div id="history-compare-status" style="font-size:12px;color:var(--text-secondary)">
+            可多选历史记录进行批量导出、批量重打分或生成评分摘要；其中 2-3 条结构一致的记录仍可直接生成历史对比报告。
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" type="button" id="history-summary-selected-btn"
+              onclick="startHistorySelectionSummaryFromSelection()" disabled>🧠 生成评分摘要</button>
+            <button class="btn btn-secondary" type="button" id="history-export-selected-btn"
+              onclick="exportSelectedHistoryConversations()" disabled>批量导出选中记录</button>
+            <button class="btn btn-secondary" type="button" id="history-rescore-selected-btn"
+              style="border-color:var(--warning-color,#f59e0b);color:var(--warning-color,#f59e0b)"
+              onclick="batchRescoreSelectedHistoryConversations()" disabled>批量重打分选中记录</button>
+            <button class="btn btn-danger" type="button" id="history-delete-selected-btn"
+              onclick="deleteSelectedHistoryConversations()" disabled>批量删除选中记录</button>
+            <button class="btn btn-primary" type="button" id="history-compare-selected-btn"
+              onclick="startHistoryCompareFromSelection()" disabled>📊 对比选中记录</button>
+            <button class="btn btn-secondary" type="button" id="history-clear-selection-btn"
+              onclick="clearHistoryCompareSelection()" disabled>清空选择</button>
+          </div>
+        </div>
+        <div id="history-report-panel"
+          style="display:none;margin-bottom:16px;padding:20px;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:16px">
+          <div
+            style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+            <div>
+              <div id="history-report-title" style="font-size:16px;font-weight:600;margin-bottom:6px">📊 历史对比报告</div>
+              <div id="history-report-meta" style="font-size:12px;color:var(--text-secondary)"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary" type="button" id="history-report-ai-summary-btn"
+                onclick="showCompareAiSummary(state.compareReportId)">🤖 AI 对比分析</button>
+              <button class="btn btn-secondary" type="button" id="history-report-export-summary-btn"
+                onclick="exportConversation({ mode: 'compare', reportId: state.compareReportId, summary: true })">导出摘要</button>
+              <button class="btn btn-secondary" type="button" id="history-report-export-full-btn"
+                onclick="exportConversation({ mode: 'compare', reportId: state.compareReportId, summary: false })">导出完整报告</button>
+              <button class="btn btn-secondary" type="button" onclick="closeHistoryCompareReport()">关闭报告</button>
+            </div>
+          </div>
+          <div id="history-report-content"></div>
+        </div>
+        <div id="history-events-panel"
+          style="display:none;margin-bottom:16px;padding:20px;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+            <div>
+              <div style="font-size:16px;font-weight:600;margin-bottom:6px">📜 执行日志</div>
+              <div id="history-events-meta" style="font-size:12px;color:var(--text-secondary)"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <select id="history-events-scope" class="form-control" style="min-width:120px">
+                <option value="">全部范围</option>
+                <option value="generation">生成</option>
+                <option value="scoring">评分</option>
+                <option value="system">系统</option>
+              </select>
+              <select id="history-events-level" class="form-control" style="min-width:120px">
+                <option value="">全部级别</option>
+                <option value="info">信息</option>
+                <option value="warn">警告</option>
+                <option value="error">错误</option>
+              </select>
+              <button class="btn btn-secondary" type="button" onclick="refreshConversationEvents()">刷新</button>
+              <button class="btn btn-secondary" type="button" id="history-events-export-btn">导出 .jsonl</button>
+              <button class="btn btn-secondary" type="button" onclick="closeConversationEvents()">关闭</button>
+            </div>
+          </div>
+          <div id="history-events-content"
+            style="max-height:320px;overflow:auto;padding:12px;border:1px solid var(--border-light);border-radius:12px;background:var(--bg-hover);font-family:monospace;font-size:12px;line-height:1.6"></div>
+        </div>
+        <table class="history-table history-records-table">
+          <thead>
+            <tr>
+              <th class="history-col-select"><input type="checkbox" id="history-select-all" title="全选/取消全选" onclick="toggleSelectAllHistory()" style="cursor:pointer;width:15px;height:15px"></th>
+              <th class="history-col-time">时间</th>
+              <th class="history-col-prompt">提示词</th>
+              <th class="history-col-role">角色</th>
+              <th class="history-col-model">模型</th>
+              <th class="history-col-turns">轮次</th>
+              <th class="history-col-score">总分</th>
+              <th class="history-col-status">状态</th>
+              <th class="history-col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- P-test-center: 统一测试中心 -->
+    <section id="page-test-center" class="page" style="padding:24px 8%;overflow-y:auto">
+      <div class="test-center-shell">
+        <div class="test-center-hero">
+          <div>
+            <h3 style="font-weight:600;margin-bottom:8px">🧪 统一测试中心</h3>
+            <p style="font-size:13px;color:var(--text-secondary)">统一入口管理批量测试、模型对比和 Prompt A/B，对底层执行链路零重写。</p>
+          </div>
+        </div>
+        <div id="orchestration-env-notice"
+          style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;margin:14px 0 18px;padding:12px 14px;border:1px solid #f59e0b;border-left:4px solid #f59e0b;border-radius:10px;background:rgba(245,158,11,0.08);color:var(--text-primary);">
+        </div>
+        <div class="test-mode-grid" role="tablist" aria-label="测试任务类型">
+          <button type="button" class="test-mode-card active" id="tc-mode-batch"
+            onclick="switchTestCenterMode('batch')">
+            <strong>批量测试</strong>
+            <span>批量配置 + 多轮输入，适合跑完整回归。</span>
+          </button>
+          <button type="button" class="test-mode-card" id="tc-mode-compare"
+            onclick="switchTestCenterMode('compare')">
+            <strong>模型对比</strong>
+            <span>同一角色和输入，横向比较多模型表现。</span>
+          </button>
+          <button type="button" class="test-mode-card" id="tc-mode-prompt-ab"
+            onclick="switchTestCenterMode('prompt-ab')">
+            <strong>Prompt A/B</strong>
+            <span>控制组与实验组并行对比，支持实时与历史复盘。</span>
+          </button>
+        </div>
+
+        <details id="tc-advanced-shell" class="test-center-advanced-shell">
+          <summary>高级设置</summary>
+          <div class="test-center-advanced-grid">
+            <div class="test-center-advanced-block">
+              <div class="test-center-advanced-title">当前运行配置</div>
+              <div id="tc-advanced-config-chips" class="test-center-config-chips"></div>
+            </div>
+            <div class="test-center-advanced-block">
+              <div class="test-center-advanced-title" id="tc-advanced-secondary-title">快捷操作</div>
+              <div id="tc-advanced-actions" class="test-center-advanced-actions"></div>
+              <div id="tc-advanced-hint" class="test-center-advanced-hint"></div>
+            </div>
+            <div class="test-center-advanced-block">
+              <div class="test-center-advanced-title">打分配置</div>
+              <div style="display:grid;gap:12px">
+                <div class="form-item" style="margin:0">
+                  <label class="form-label">打分模型</label>
+                  <select id="tc-scoring-model" class="form-control"></select>
+                </div>
+                <div class="form-item" style="margin:0">
+                  <label class="form-label">思考深度</label>
+                  <select id="tc-scoring-thinking-effort" class="form-control">
+                    <option value="disabled">关闭</option>
+                    <option value="low">低 (256 tokens)</option>
+                    <option value="medium">中 (1024 tokens)</option>
+                    <option value="high">高 (4096 tokens)</option>
+                  </select>
+                  <div id="tc-scoring-thinking-hint" style="margin-top:6px;font-size:12px;color:var(--text-tertiary)">
+                    默认深度：high
+                  </div>
+                </div>
+                <div class="form-item" style="margin:0">
+                  <label class="form-label" for="tc-scoring-concurrency">打分并发
+                    <span id="tc-scoring-concurrency-display" style="margin-left:6px;color:var(--primary-color)">24</span>
+                  </label>
+                  <input type="range" id="tc-scoring-concurrency" min="1" max="24" value="24">
+                </div>
+                <div class="form-item" style="margin:0">
+                  <label class="form-label">失败自动重试</label>
+                  <select id="tc-scoring-retry" class="form-control">
+                    <option value="3" selected>3 次</option>
+                    <option value="5">5 次</option>
+                    <option value="0">不重试</option>
+                  </select>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                  <button type="button" class="btn btn-secondary btn-sm" id="tc-scoring-save-defaults" onclick="saveScoringDefaults()">保存为默认</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="tc-scoring-reset-defaults" onclick="resetScoringDefaults()">恢复系统默认</button>
+                </div>
+                <div id="tc-scoring-default-status" style="font-size:12px;color:var(--text-tertiary);line-height:1.6">
+                  已保存默认：qwen3.6-plus / 思考 high / 并发 24 / 重试 3 次
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="tc-tab-content-wrapper">
+      <!-- 批量测试 -->
+      <div id="tc-tab-batch" class="tc-tab-content active">
+        <div class="tc-split-layout">
+        <div class="tc-split-left">
+        <div
+          style="display:flex;flex-direction:column;gap:16px;margin-bottom:20px;background:var(--bg-surface);padding:20px;border:1px solid var(--border-light);border-radius:12px;">
+
+          <!-- 第一行：配置来源区 -->
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              测试配置来源
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <button class="btn btn-secondary" onclick="$('batch-excel-input').click()">📥 上传 Excel 配置</button>
+              <button class="btn btn-secondary" onclick="loadCurrentConfigToBatch()">🔄 同步当前对话配置</button>
+              <button class="btn btn-secondary" onclick="$('batch-output-input').click()">📤 上传已有输出打分</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text-tertiary)">
+              <span>模板参考:</span>
+              <a id="batch-config-template-link" href="/api/configs/export-template"
+                style="color:var(--primary-color)">Excel配置模板</a>
+              <span>|</span>
+              <a id="batch-scoring-template-link" href="/api/scoring/template/download"
+                style="color:var(--primary-color)">已有打分模板</a>
+            </div>
+            <input type="file" id="batch-excel-input" accept=".xlsx,.xls" style="display:none"
+              onchange="handleBatchExcelImport(event)">
+            <input type="file" id="batch-output-input" accept=".xlsx,.xls" style="display:none"
+              onchange="handleBatchOutputScoring(event)">
+
+             <!-- 信息面板卡片（已移至右栏 tc-batch-right） -->
+            </div>
+
+          <!-- 多轮对话输入 -->
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              💬 多轮对话输入（每行一轮）
+            </div>
+            <textarea id="batch-turns" class="form-control" style="font-family:var(--font);min-height:120px"
+              placeholder="今天天气真好&#10;你刚才看我的眼神好奇怪&#10;那你为什么突然笑了"></textarea>
+            <span style="font-size:11px;color:var(--text-tertiary)">每行代表一轮用户输入，上传Excel时此处会被Excel中的turns覆盖</span>
+          </div>
+
+          <div style="height:1px;background:var(--border-light);margin:4px 0;"></div>
+
+          <!-- 第二行：模型控制与跑测区 -->
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+              模型与执行策略
+            </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">批量主模型</label>
+               <select id="batch-model" class="form-control" style="width:240px;height:32px;">
+                 <option value="使用配置面板模型">同步全局左上角设置</option>
+               </select>
+               <span style="font-size:12px;color:var(--text-secondary)">默认跟随顶部主模型，也可在这里单独指定批量执行模型。</span>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">批量并发</label>
+               <input id="batch-concurrency" type="number" class="form-control"
+                 style="width:140px;height:32px;" min="1" max="24" step="1" value="3">
+               <span style="font-size:12px;color:var(--text-secondary)">建议 3–8；模型配额充足时可开到 20+；实际并发仍受后端并发上限影响。</span>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">会话组数</label>
+               <input id="batch-run-limit" type="number" class="form-control"
+                 style="width:140px;height:32px;" min="0" step="1" value="0" oninput="renderBatchConfigSummary()">
+               <span style="font-size:12px;color:var(--text-secondary)">0 表示全跑；填 20 就只执行前 20 个角色-用户会话组，不按 Excel 行裁切。</span>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">指定角色</label>
+               <input id="batch-role-filter" type="text" class="form-control"
+                 style="width:360px;height:32px;" placeholder="多个角色用逗号、顿号、换行分隔" oninput="renderBatchConfigSummary()">
+               <span style="font-size:12px;color:var(--text-secondary)">只从已分组的角色-用户会话里挑这些角色执行，例如：简川，博深。</span>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">随机抽样</label>
+               <div style="display:flex;align-items:center;gap:8px;"><label class="switch"><input type="checkbox"
+                     id="batch-random-sample" onchange="renderBatchConfigSummary()"><span class="slider"></span></label><span
+                   style="font-size:12px;color:var(--text-secondary)">开启后先按指定角色筛选，再从命中的会话组里随机抽样；会话组数=抽样数量，0 表示随机顺序跑全部命中组。</span></div>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+               <label class="form-label" style="margin:0;min-width:70px">每组轮数</label>
+               <input id="batch-turn-limit" type="number" class="form-control"
+                 style="width:140px;height:32px;" min="0" step="1" value="0" oninput="renderBatchConfigSummary()">
+               <span style="font-size:12px;color:var(--text-secondary)">0 表示该组全轮次；填 5 就表示每个角色-用户会话只跑前 5 轮。</span>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;">
+               <label class="form-label" style="margin:0;min-width:70px">安全落盘</label>
+               <div style="display:flex;align-items:center;gap:8px;"><label class="switch"><input type="checkbox"
+                     id="batch-dryrun"><span class="slider"></span></label><span
+                   style="font-size:12px;color:var(--text-secondary)">开启演练模式（仅测试通信，不落盘 Excel）</span></div>
+             </div>
+             <div style="display:flex;align-items:center;gap:16px;">
+               <label class="form-label" style="margin:0;min-width:70px">自动评分</label>
+               <div style="display:flex;align-items:center;gap:8px;"><label class="switch"><input type="checkbox"
+                     id="batch-auto-scoring"><span class="slider"></span></label><span
+                   style="font-size:12px;color:var(--text-secondary)">批量阶段自动 AI 评分（默认关闭，避免触发限流；可跑完后补评分）</span></div>
+             </div>
+
+             <button class="btn btn-primary" id="btn-batch-start"
+               style="width:100%;justify-content:center;padding:10px;margin-top:8px;" onclick="startBatchTest()">🚀
+               开始批量生成并落盘</button>
+             <div id="batch-control-row" style="display:none;gap:8px;margin-top:8px">
+               <button class="btn btn-secondary" id="btn-batch-pause" style="flex:1;justify-content:center"
+                 onclick="pauseBatchTest()">⏸ 暂停</button>
+               <button class="btn btn-secondary" id="btn-batch-resume"
+                 style="display:none;flex:1;justify-content:center" onclick="resumeBatchTest()">▶ 继续</button>
+               <button class="btn btn-danger" id="btn-batch-stop" style="flex:1;justify-content:center"
+                 onclick="stopBatchTest()">⏹ 停止</button>
+             </div>
+           </div>
+         </div>
+        </div><!-- /tc-split-left -->
+
+        <!-- 右栏：配置概览 + 进度 + 结果 -->
+        <div class="tc-split-right" id="tc-batch-right">
+          <!-- 空状态提示 -->
+          <div class="tc-right-empty" id="batch-right-empty">
+            <div class="tc-right-empty-icon">📋</div>
+            <div class="tc-right-empty-title">等待配置</div>
+            <div class="tc-right-empty-text">上传 Excel 配置或同步当前对话配置后，此处显示配置概览与测试结果</div>
+          </div>
+
+          <!-- 配置概览（从左栏移入） -->
+          <div id="batch-config-summary"
+            style="display:none;font-size:13px;color:var(--text-secondary);padding:12px;background:var(--bg-hover);border-radius:6px;border-left:3px solid var(--primary-color);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px">
+              <div style="font-weight:600">📊 配置概览</div>
+              <button class="btn btn-secondary btn-sm" id="btn-batch-config-toggle" style="display:none"
+                onclick="toggleBatchConfigAll()">查看全部</button>
+            </div>
+            <div id="batch-config-detail"></div>
+            <div id="batch-config-all"
+              style="display:none;margin-top:10px;max-height:360px;overflow:auto;border:1px solid var(--border-light);border-radius:8px;background:var(--bg-surface);">
+            </div>
+          </div>
+
+          <!-- 输出打分面板（从左栏移入） -->
+          <div id="batch-output-summary"
+            style="display:none;font-size:13px;color:var(--text-secondary);padding:12px;background:var(--bg-hover);border-radius:6px;border-left:3px solid #00b42a;">
+            <div style="font-weight:600;margin-bottom:6px">📝 输出打分结果</div>
+            <div id="batch-output-detail"></div>
+          </div>
+
+          <!-- 进度条 -->
+          <div id="batch-progress" style="display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-secondary);margin-bottom:4px">
+              <span id="batch-progress-text">准备中...</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span id="batch-progress-count" style="font-weight:600">0/0</span>
+                <span id="batch-progress-failed" style="color:var(--danger-color);display:none">失败 <strong id="batch-failed-num">0</strong></span>
+              </div>
+            </div>
+            <div class="chat-progress-bar">
+              <div class="chat-progress-fill" id="batch-progress-fill" style="width:0%"></div>
+            </div>
+            <!-- 评分操作栏：重试失败 + 查看未完成 -->
+            <div id="batch-score-toolbar" style="display:none;margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" id="btn-retry-failed-scoring" onclick="retryFailedScoringItems()" title="对失败或未完成轮次重新发起打分">
+                🔁 重试失败/未完成项
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-view-incomplete-scoring" onclick="showIncompleteScoringItems()" title="查看尚未完成打分的会话">
+                🔍 查看未完成打分
+              </button>
+            </div>
+          </div>
+
+          <!-- 测试结果 -->
+          <div id="batch-results" style="display:none">
+            <div class="group-title">测试结果</div>
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>角色</th>
+                  <th>关系</th>
+                  <th>轮次</th>
+                  <th>平均字数</th>
+                  <th>AI均分</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="batch-results-tbody"></tbody>
+            </table>
+          </div>
+        </div><!-- /tc-split-right -->
+        </div><!-- /tc-split-layout -->
+      </div>
+      <!-- 模型横向对比 -->
+      <div id="tc-tab-compare" class="tc-tab-content">
+        <div class="tc-split-layout">
+        <div class="tc-split-left">
+        <div
+          style="display:flex;flex-direction:column;gap:16px;margin-bottom:20px;background:var(--bg-surface);padding:20px;border:1px solid var(--border-light);border-radius:12px;">
+          <!-- 第一行：配置来源区 -->
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              测试配置
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <button class="btn btn-secondary" onclick="loadConfigToCompare()">🔄 同步当前对话配置</button>
+              <button class="btn btn-secondary" onclick="$('compare-excel-input').click()">📥 上传 Excel（批量角色）</button>
+              <button class="btn btn-secondary" onclick="clearCompareExcelConfigs()">🗑️ 清空 Excel</button>
+            </div>
+            <input type="file" id="compare-excel-input" accept=".xlsx,.xls" style="display:none"
+              onchange="handleCompareExcelImport(event)">
+            <div id="compare-excel-summary" style="font-size:12px;color:var(--text-secondary);margin-top:4px"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text-tertiary)">
+              <span>模板参考:</span>
+              <a href="/api/configs/export-template" style="color:var(--primary-color)">Excel配置模板</a>
+              <span style="color:var(--text-tertiary)">（与批量测试通用：支持完整角色变量 + 用户输入列，按 nickname+relationship 自动合并多轮）</span>
+            </div>
+            <!-- compare-config-info moved to right panel -->
+          </div>
+
+          <!-- 多轮对话输入 -->
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              💬 多轮对话输入（每行一轮）
+            </div>
+            <textarea id="compare-turns" class="form-control" style="font-family:var(--font);min-height:120px"
+              placeholder="今天天气真好&#10;你刚才看我的眼神好奇怪&#10;那你为什么突然笑了"></textarea>
+            <span style="font-size:11px;color:var(--text-tertiary)">所有对比模型将使用相同的多轮用户输入</span>
+          </div>
+
+          <div style="height:1px;background:var(--border-light);margin:4px 0;"></div>
+
+          <!-- 第二行：模型控制与跑测区 -->
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div
+              style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+              对比模型与执行策略
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <label class="form-label" style="margin:0;">选择对比模型（可多选）</label>
+                <button type="button" id="btn-toggle-all-compare" class="btn btn-secondary"
+                  style="padding:4px 10px;font-size:12px;min-height:auto" onclick="toggleSelectAllCompareModels()">全选</button>
+              </div>
+              <div id="compare-model-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:16px;margin-top:4px;">
+              <label class="form-label" style="margin:0;min-width:70px">安全落盘</label>
+              <div style="display:flex;align-items:center;gap:8px;"><label class="switch"><input type="checkbox"
+                    id="compare-dryrun"><span class="slider"></span></label><span
+                  style="font-size:12px;color:var(--text-secondary)">开启演练模式</span></div>
+            </div>
+
+            <button class="btn btn-primary" id="btn-compare-start"
+              style="width:100%;justify-content:center;padding:10px;margin-top:8px;" onclick="startModelCompare()">🚀
+              开始横向对比测试</button>
+            <div id="compare-control-row" style="display:none;gap:8px;margin-top:8px">
+              <button class="btn btn-secondary" id="btn-compare-pause" style="flex:1;justify-content:center"
+                onclick="pauseCompareTest()">⏸ 暂停</button>
+              <button class="btn btn-secondary" id="btn-compare-resume"
+                style="display:none;flex:1;justify-content:center" onclick="resumeCompareTest()">▶ 继续</button>
+              <button class="btn btn-danger" id="btn-compare-stop" style="flex:1;justify-content:center"
+                onclick="stopCompareTest()">⏹ 停止</button>
+              <button class="btn btn-secondary" id="btn-compare-retry"
+                style="display:none;flex:1;justify-content:center;border-color:var(--warning-color,#f59e0b);color:var(--warning-color,#f59e0b)"
+                onclick="retryIncompleteCompareItems()">🔁 重试未完成项</button>
+            </div>
+          </div>
+        </div>
+        </div><!-- /tc-split-left -->
+
+        <!-- 右栏：配置信息 + 进度 + 对比结果 -->
+        <div class="tc-split-right" id="tc-compare-right">
+          <!-- 空状态提示 -->
+          <div class="tc-right-empty" id="compare-right-empty">
+            <div class="tc-right-empty-icon">⚖️</div>
+            <div class="tc-right-empty-title">等待配置</div>
+            <div class="tc-right-empty-text">同步当前对话配置并选择对比模型后，此处显示配置信息与对比结果</div>
+          </div>
+
+          <!-- 配置信息（从左栏移入） -->
+          <div id="compare-config-info"
+            style="display:none;font-size:13px;color:var(--text-tertiary);padding:12px;background:var(--bg-hover);border-radius:6px;border-left:3px solid var(--primary-color);">
+          </div>
+
+          <!-- 进度条 -->
+          <div id="compare-progress" style="display:none">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-secondary)"><span
+                id="compare-progress-text">准备中...</span><span style="display:flex;gap:12px;align-items:center"><span id="compare-progress-count">0/0</span><span id="compare-progress-failed" style="color:var(--danger-color);display:none">未完成 <strong id="compare-failed-num">0</strong></span></span></div>
+            <div class="chat-progress-bar">
+              <div class="chat-progress-fill" id="compare-progress-fill" style="width:0%"></div>
+            </div>
+          </div>
+
+          <!-- 对比结果 -->
+          <div id="compare-results" style="display:none">
+            <div class="group-title">对比结果</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px"
+              id="compare-cards"></div>
+            <div style="margin-top:24px;text-align:center">
+              <div style="font-weight:600;margin-bottom:12px">维度对比雷达图（叠加）</div><svg id="compare-radar-svg"
+                viewBox="0 0 400 400" style="max-width:400px"></svg>
+            </div>
+          </div>
+        </div><!-- /tc-split-right -->
+        </div><!-- /tc-split-layout -->
+      </div>
+
+      <!-- 提示词 A/B 对比 -->
+      <div id="tc-tab-prompt-ab" class="tc-tab-content">
+        <div
+          style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+          <div style="font-size:12px;color:var(--text-secondary)">Prompt A/B 默认复用当前右侧参数配置。实时模式适合逐句追问，批量模式适合多角色或多轮回归测试。</div>
+        </div>
+        <div
+          style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-hover);border-radius:10px;border:1px solid var(--border-light)">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label class="switch"><input type="checkbox" id="ab-lock-model" checked><span class="slider"></span></label>
+            <div style="font-size:12px;color:var(--text-secondary)">推荐锁定同一模型，仅比较提示词差异。解锁后才允许做“模型 + 提示词”联合实验。</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary" id="ab-mode-live" onclick="switchABMode('live')">实时实验</button>
+            <button type="button" class="btn btn-secondary" id="ab-mode-batch" onclick="switchABMode('batch')">批量测试</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+          <!-- 基础模型配置 -->
+          <div
+            style="background:var(--bg-surface);padding:16px;border-radius:12px;border:1px solid var(--border-light)">
+            <div style="font-weight:600;margin-bottom:12px;color:var(--text-primary)">🔵 控制组 (基线)</div>
+            <div class="form-item">
+              <label class="form-label">模型</label>
+              <select id="ab-base-model" class="form-control"></select>
+            </div>
+            <div class="form-item">
+              <label class="form-label">提示词版本</label>
+              <select id="ab-base-prompt" class="form-control"></select>
+            </div>
+          </div>
+          <!-- 对比模型配置 -->
+          <div style="background:var(--bg-surface);padding:16px;border-radius:12px;border:1px solid #10b98140">
+            <div style="font-weight:600;margin-bottom:12px;color:#10b981">🟢 实验组 (改进)</div>
+            <div class="form-item">
+              <label class="form-label">模型</label>
+              <select id="ab-compare-model" class="form-control"></select>
+              <div id="ab-compare-model-note" style="margin-top:6px;font-size:11px;color:var(--text-tertiary)">默认跟随控制组模型。</div>
+            </div>
+            <div class="form-item">
+              <label class="form-label">提示词版本</label>
+              <select id="ab-compare-prompt" class="form-control"></select>
+            </div>
+          </div>
+        </div>
+        <div id="ab-live-mode">
+          <!-- 同步输入栏 -->
+          <div style="margin-bottom:20px">
+            <div class="form-item">
+              <label class="form-label">剧情推进输入</label>
+              <div style="display:flex;gap:8px">
+                <textarea id="ab-input" class="form-control" style="flex:1;min-height:80px;font-family:var(--font)"
+                  placeholder="输入用户剧情...支持多轮连续推理实验"></textarea>
+                <button class="btn btn-primary" id="btn-ab-send" style="padding:0 24px" onclick="startABTest()">🚀
+                  发送</button>
+              </div>
+            </div>
+          </div>
+          <!-- A/B 对话历史区 -->
+          <div id="ab-history" style="margin-bottom:16px"></div>
+          <!-- A/B 对比结果视图 -->
+          <div id="ab-results" style="display:none">
+            <div class="group-title">A/B 输出对比</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+              <!-- 基线输出 -->
+              <div
+                style="background:var(--bg-hover);border-radius:12px;border:1px solid var(--border-light);display:flex;flex-direction:column">
+                <div
+                  style="padding:12px;border-bottom:1px solid var(--border-light);font-weight:600;display:flex;justify-content:space-between">
+                  <span>🔵 控制组输出</span>
+                  <span id="ab-base-status" style="font-size:12px;color:var(--text-tertiary)">就绪</span>
+                </div>
+                <div id="ab-base-content" class="msg-content"
+                  style="padding:16px;flex:1;overflow-y:auto;max-height:600px;font-size:13px;line-height:1.6">暂无内容</div>
+              </div>
+              <!-- 实验输出 -->
+              <div
+                style="background:#10b9810d;border-radius:12px;border:1px solid #10b98140;display:flex;flex-direction:column">
+                <div
+                  style="padding:12px;border-bottom:1px solid #10b98140;font-weight:600;display:flex;justify-content:space-between;color:#10b981">
+                  <span>🟢 实验组输出</span>
+                  <span id="ab-compare-status" style="font-size:12px">就绪</span>
+                </div>
+                <div id="ab-compare-content" class="msg-content"
+                  style="padding:16px;flex:1;overflow-y:auto;max-height:600px;font-size:13px;line-height:1.6">暂无内容</div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /ab-live-mode -->
+        <div id="ab-batch-mode" style="display:none">
+          <div class="tc-split-layout">
+            <div class="tc-split-left">
+              <div
+                style="display:flex;flex-direction:column;gap:16px;margin-bottom:20px;background:var(--bg-surface);padding:20px;border:1px solid var(--border-light);border-radius:12px;">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div
+                    style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    测试配置
+                  </div>
+                  <div style="display:flex;gap:12px;flex-wrap:wrap">
+                    <button class="btn btn-secondary" type="button" onclick="loadConfigToABBatch()">🔄 同步当前对话配置</button>
+                    <button class="btn btn-secondary" type="button" onclick="$('ab-batch-excel-input').click()">📥 上传 Excel（批量角色）</button>
+                    <button class="btn btn-secondary" type="button" onclick="clearABBatchExcelConfigs()">🗑️ 清空 Excel</button>
+                  </div>
+                  <input type="file" id="ab-batch-excel-input" accept=".xlsx,.xls" style="display:none"
+                    onchange="handleABBatchExcelImport(event)">
+                  <div id="ab-batch-excel-summary" style="font-size:12px;color:var(--text-secondary);margin-top:4px"></div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text-tertiary)">
+                    <span>模板参考:</span>
+                    <a href="/api/configs/export-template" style="color:var(--primary-color)">Excel配置模板</a>
+                    <span style="color:var(--text-tertiary)">（与模型对比通用：支持完整角色变量 + 用户输入列，按 nickname+relationship 自动合并多轮）</span>
+                  </div>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <div
+                    style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+                    💬 多轮对话输入（每行一轮）
+                  </div>
+                  <textarea id="ab-batch-turns" class="form-control" style="font-family:var(--font);min-height:120px"
+                    placeholder="今天天气真好&#10;你刚才看我的眼神好奇怪&#10;那你为什么突然笑了"></textarea>
+                  <span style="font-size:11px;color:var(--text-tertiary)">单角色模式下会使用这里的 turns；上传 Excel 后优先使用 Excel 内自带 turns。</span>
+                </div>
+
+                <div style="height:1px;background:var(--border-light);margin:4px 0;"></div>
+
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div
+                    style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary-color)">
+                      <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                      <polyline points="2 17 12 22 22 17"></polyline>
+                      <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                    批量执行策略
+                  </div>
+                  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                    <label class="form-label" style="margin:0;min-width:70px">角色并发</label>
+                    <input id="ab-batch-concurrency" type="number" class="form-control"
+                      style="width:140px;height:32px;" min="1" max="12" step="1" value="1">
+                    <span style="font-size:12px;color:var(--text-secondary)">每个角色固定占 2 个分支位。填 3 表示同时跑 3 个角色，共 6 个 A/B 分支。</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:16px;margin-top:4px;">
+                    <label class="form-label" style="margin:0;min-width:70px">安全落盘</label>
+                    <div style="display:flex;align-items:center;gap:8px;"><label class="switch"><input type="checkbox"
+                          id="ab-batch-dryrun"><span class="slider"></span></label><span
+                        style="font-size:12px;color:var(--text-secondary)">开启演练模式</span></div>
+                  </div>
+                  <button class="btn btn-primary" id="btn-ab-batch-start"
+                    style="width:100%;justify-content:center;padding:10px;margin-top:8px;" onclick="startABBatchTest()">🚀
+                    开始 Prompt A/B 批量测试</button>
+                  <div id="ab-batch-control-row" style="display:none;gap:8px;margin-top:8px">
+                    <button class="btn btn-secondary" id="btn-ab-batch-pause" style="flex:1;justify-content:center"
+                      onclick="pauseABBatchTest()">⏸ 暂停</button>
+                    <button class="btn btn-secondary" id="btn-ab-batch-resume"
+                      style="display:none;flex:1;justify-content:center" onclick="resumeABBatchTest()">▶ 继续</button>
+                    <button class="btn btn-danger" id="btn-ab-batch-stop" style="flex:1;justify-content:center"
+                      onclick="stopABBatchTest()">⏹ 停止</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="tc-split-right" id="tc-ab-batch-right">
+              <div class="tc-right-empty" id="ab-batch-right-empty">
+                <div class="tc-right-empty-icon">🧪</div>
+                <div class="tc-right-empty-title">等待配置</div>
+                <div class="tc-right-empty-text">同步当前对话配置或上传 Excel 后，此处显示 Prompt A/B 批量测试进度与结果</div>
+              </div>
+
+              <div id="ab-batch-config-info"
+                style="display:none;font-size:13px;color:var(--text-tertiary);padding:12px;background:var(--bg-hover);border-radius:6px;border-left:3px solid var(--primary-color);">
+              </div>
+
+              <div id="ab-batch-progress" style="display:none">
+                <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-secondary)"><span
+                    id="ab-batch-progress-text">准备中...</span><span id="ab-batch-progress-count">0/0</span></div>
+                <div class="chat-progress-bar">
+                  <div class="chat-progress-fill" id="ab-batch-progress-fill" style="width:0%"></div>
+                </div>
+              </div>
+
+              <div id="ab-batch-results" style="display:none">
+                <div class="group-title">批量 A/B 结果</div>
+                <div id="ab-batch-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px"></div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /ab-batch-mode -->
+      </div><!-- /tc-tab-prompt-ab -->
+      </div>
+    </section>
+
+    <!-- P7: 提示词管理页 -->
+    <section id="page-prompts" class="page" style="padding:24px 8%;overflow-y:auto">
+      <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <h3 style="font-weight:600;margin-bottom:8px">📖 提示词版本管理</h3>
+          <p style="color:var(--text-tertiary);font-size:13px">查看、预览、下载、编辑并管理主提示词、摘要提示词、打分提示词版本</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" id="prompt-new-version-btn" onclick="createPromptVersion()" style="display:none">🆕 新建版本</button>
+          <button class="btn btn-primary" onclick="$('prompt-upload-input').click()">📤 上传</button>
+          <input type="file" id="prompt-upload-input" accept=".md" style="display:none" onchange="uploadPrompt(event)">
+        </div>
+      </div>
+      <div class="prompt-kind-switch" id="prompt-kind-switch" style="margin-bottom:16px">
+        <button type="button" class="prompt-kind-pill active" data-kind="chat" onclick="switchPromptKind('chat')">主提示词</button>
+        <button type="button" class="prompt-kind-pill" data-kind="summary" onclick="switchPromptKind('summary')">摘要提示词</button>
+        <button type="button" class="prompt-kind-pill" data-kind="scoring" onclick="switchPromptKind('scoring')">打分提示词</button>
+        <button type="button" class="prompt-kind-pill" data-kind="profile" onclick="switchPromptKind('profile')">画像提示词</button>
+      </div>
+      <div id="prompt-kind-meta" style="margin-bottom:12px;color:var(--text-tertiary);font-size:12px"></div>
+      <div id="prompt-list" style="display:grid;gap:12px"></div>
+      <div id="prompt-preview"
+        style="display:none;margin-top:24px;padding:20px;background:var(--bg-surface);border-radius:12px;border:1px solid var(--border-light)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div style="font-weight:600;font-size:15px" id="prompt-preview-title"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="closePromptPreview()">关闭</button>
+            <button class="btn btn-secondary" id="prompt-edit-btn" onclick="togglePromptEdit()">✏️ 编辑</button>
+            <button class="btn btn-secondary" id="prompt-activate-btn" style="display:none" onclick="activatePromptVersion()">设为生效版本</button>
+            <button class="btn btn-primary" id="prompt-save-btn" style="display:none" onclick="savePromptEdit()">💾
+              保存</button>
+            <button class="btn btn-primary" id="prompt-download-btn">📥 下载</button>
+          </div>
+        </div>
+        <pre id="prompt-preview-content"
+          style="white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:500px;overflow-y:auto;padding:16px;background:var(--bg-hover);border-radius:8px;line-height:1.6"></pre>
+        <textarea id="prompt-edit-content"
+          style="display:none;width:100%;min-height:400px;max-height:600px;font-size:12px;padding:16px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:8px;line-height:1.6;font-family:monospace;resize:vertical"></textarea>
+      </div>
+    </section>
+  </main>
+
+  <!-- 模态框：人工详细打分 -->
+  <div class="modal-backdrop" id="modal-human-score" role="dialog" aria-modal="true"
+    aria-labelledby="modal-human-score-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center">
+    <div class="modal-content"
+      style="background:var(--bg-body);width:90%;max-width:800px;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,0.2);display:flex;flex-direction:column;max-height:90vh">
+      <div
+        style="padding:20px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0;font-weight:600" id="modal-human-score-title">✍️ 专家人工打分校准</h3>
+        <button style="background:none;border:none;cursor:pointer;color:var(--text-secondary)"
+          onclick="closeHumanScoreModal()"><svg viewBox="0 0 24 24" class="icon" stroke="currentColor" stroke-width="2"
+            fill="none">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg></button>
+      </div>
+      <div style="padding:24px;overflow-y:auto;flex:1">
+        <div style="margin-bottom:24px;padding:16px;background:var(--bg-surface);border-radius:8px">
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">正在评估回答：</div>
+          <div id="hs-target-text"
+            style="font-size:13px;line-height:1.6;color:var(--text-secondary);max-height:150px;overflow-y:auto"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px" id="hs-dimensions-container">
+          <!-- 动态渲染五维打分项 (滑块或星级) -->
+        </div>
+        <div class="form-item" style="margin-top:20px">
+          <label class="form-label">综合点评与优化建议</label>
+          <textarea id="hs-comment" class="form-control" style="min-height:80px;font-family:var(--font)"
+            placeholder="请输入人工详细反馈..."></textarea>
+        </div>
+      </div>
+      <div style="padding:20px;border-top:1px solid var(--border-light);display:flex;justify-content:flex-end;gap:12px">
+        <button class="btn btn-secondary" onclick="closeHumanScoreModal()">取消</button>
+        <button class="btn btn-primary" onclick="submitHumanScore()">保存打分</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧配置面板 -->
+  <aside class="right-panel" id="rightPanel" role="complementary" aria-label="配置参数">
+    <div class="panel-header"><span>参数配置</span><button class="panel-close" id="closePanelBtn"><svg viewBox="0 0 24 24"
+          class="icon" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg></button></div>
+    <div class="panel-content">
+      <div class="panel-tabs">
+        <div class="panel-tab active" onclick="switchRightTab(event, 'role')">🎭 角色</div>
+        <div class="panel-tab" onclick="switchRightTab(event, 'params')">⚙️ 参数</div>
+      </div>
+
+      <div id="tab-role" class="tab-content active">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn btn-secondary" style="flex:1" onclick="importConfigExcel()">📥 导入</button>
+          <button class="btn btn-secondary" style="flex:1" onclick="exportConfigExcel()">📤 导出</button>
+        </div>
+        <input type="file" id="excel-import-input" accept=".xlsx,.xls" style="display:none"
+          onchange="handleExcelImport(event)">
+        <div style="font-size:12px;text-align:center;color:var(--text-secondary);margin-bottom:16px">
+          📥 模板下载:
+          <a id="config-variable-template-link" href="/api/configs/variables/template/export"
+            style="color:var(--primary-color)">变量表</a>
+          |
+          <a id="scoring-template-link" href="/api/scoring/template/download"
+            style="color:var(--primary-color)">打分模板</a>
+          |
+          <a id="conversation-template-link" href="/api/configs/export-template"
+            style="color:var(--primary-color)">对话模板</a>
+        </div>
+        <div class="form-group">
+          <div class="group-title">预设角色</div>
+          <div class="preset-grid" id="preset-grid"></div>
+        </div>
+        <div class="role-variable-editor-shell">
+          <div class="role-variable-editor-summary">
+            <div class="role-variable-editor-summary-main">
+              <span class="role-variable-editor-summary-title">变量工作台</span>
+              <div class="role-variable-editor-legend" aria-label="变量状态说明">
+                <span class="role-variable-editor-legend-pill is-auto">蓝 = 系统自动</span>
+                <span class="role-variable-editor-legend-pill is-manual">紫 = 手动</span>
+                <span class="role-variable-editor-legend-pill is-missing">红 = 待补充</span>
+                <span class="role-variable-editor-legend-pill is-optional">绿 = 可留空</span>
+              </div>
+            </div>
+            <details class="role-variable-editor-help">
+              <summary>ⓘ 查看自动填充与覆盖规则</summary>
+              <div class="role-variable-editor-help-copy">
+                系统变量会直接显示默认值或联动结果，并标明来源。你可以对可编辑字段手动覆盖；长文本字段默认显示摘要卡，点击“展开编辑”后进入大输入态。
+              </div>
+            </details>
+          </div>
+          <div id="role-variable-editor" class="role-variable-editor"></div>
+        </div>
+        <div id="role-form-legacy-storage" style="display:none" aria-hidden="true">
+        <div class="form-item"><label class="form-label">昵称</label><input type="text" id="f-nickname"
+            class="form-control" placeholder="如：萧璟言"></div>
+        <div class="form-grid-2">
+          <div class="form-item"><label class="form-label">性别</label><select id="f-gender" class="form-control">
+              <option>男</option>
+              <option>女</option>
+            </select></div>
+          <div class="form-item"><label class="form-label">年龄</label><input type="number" id="f-age"
+              class="form-control" placeholder="25"></div>
+        </div>
+        <div class="form-item"><label class="form-label">职业</label><input type="text" id="f-occupation"
+            class="form-control" placeholder="金融分析师"></div>
+        <div class="form-item"><label class="form-label">代表作品</label><input type="text" id="f-role-info-works"
+            class="form-control" placeholder="如：代表作 / 代表项目 / 经典经历"></div>
+        <div class="form-item"><label class="form-label">人设性格</label><input type="text" id="f-personality"
+            class="form-control" placeholder="霸道腹黑型人设"></div>
+        <div class="form-item"><label class="form-label">话术风格</label><input type="text" id="f-speaking-style"
+            class="form-control" placeholder="强势、简短的语气"></div>
+        <div class="form-item"><label class="form-label">背景</label><input type="text" id="f-background"
+            class="form-control" placeholder="出身军人家庭，从小在严格纪律中长大"></div>
+        <div class="form-item"><label class="form-label">兴趣爱好</label><input type="text" id="f-hobby"
+            class="form-control" placeholder="书法、品茶、拳击"></div>
+
+        <div style="margin-top:20px;margin-bottom:8px;font-weight:600;font-size:14px">关系与场景</div>
+        <div class="form-item"><label class="form-label">关系阶段</label><select id="f-relationship" class="form-control"
+            onchange="updateRelLinkage()">
+            <option>熟人</option>
+            <option>朋友</option>
+            <option>暧昧</option>
+            <option>恋人</option>
+            <option>结婚</option>
+          </select></div>
+        <div id="rel-linkage-preview"
+          style="font-size:12px;color:var(--text-tertiary);padding:6px 10px;background:var(--bg-hover);border-radius:4px;margin-bottom:10px;display:none">
+          <div>🔗 <strong>自动联动</strong>：</div>
+          <div id="rel-linkage-text"></div>
+        </div>
+        <div class="form-item"><label class="form-label">场景</label><input type="text" id="f-scene" class="form-control"
+            placeholder="公司花园"></div>
+        <div class="form-grid-2">
+          <div class="form-item"><label class="form-label">时段</label><select id="f-timeperiod" class="form-control">
+              <option>清晨</option>
+              <option>上午</option>
+              <option>中午</option>
+              <option>下午</option>
+              <option>傍晚</option>
+              <option>深夜</option>
+            </select></div>
+          <div class="form-item"><label class="form-label">季节</label><select id="f-season" class="form-control">
+              <option>春季</option>
+              <option>夏季</option>
+              <option>秋季</option>
+              <option>冬季</option>
+            </select></div>
+        </div>
+        <div class="form-item"><label class="form-label">用户昵称</label><input type="text" id="f-user-nickname"
+            class="form-control" placeholder="小鹿" value="小鹿"></div>
+        <div class="form-grid-2">
+          <div class="form-item"><label class="form-label">用户性别</label><select id="f-user-gender" class="form-control">
+              <option>女</option>
+              <option>男</option>
+            </select></div>
+          <div class="form-item"><label class="form-label">用户身份</label><input type="text" id="f-user-identity"
+              class="form-control" placeholder="邻家女孩"></div>
+        </div>
+        <div class="accordion" style="margin-top:16px;border-top:1px solid var(--border-light);padding-top:16px">
+          <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')"><span>系统模块配置</span><svg
+              viewBox="0 0 24 24" class="icon chevron" fill="none" stroke="currentColor">
+              <polyline points="6 9 12 15 18 9" />
+            </svg></div>
+          <div class="accordion-content">
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">长文人设 (longform_persona)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-persona" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-persona', '长文人设')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-persona" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">长文叙事风格 (longform_narrative_style)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-style" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-style', '长文叙事风格')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-style" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">Few-shot 示例 (longform_few_shot)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-fewshot" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-fewshot', 'Few-shot 示例')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-fewshot" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">长期记忆用户画像 (dialogueStartPrompt)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-startprompt" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-startprompt', '长期记忆用户画像')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-startprompt" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">当前正在做的事情 (weekly_schedule)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-schedule" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-schedule', '当前正在做的事情')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-schedule" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">对话摘要 (dialogue_summary)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-summary" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-summary', '对话摘要')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-summary" class="form-control" style="display:none">【用户画像信息】
+- 用户小名：小鹿
+- 身份：上班族
+- 偏爱：喜欢喝奶茶，经常抱怨工作累
+- 讨厌：被催促
+
+【上次对话时间】
+2025-10-24 18:30
+
+【摘要】
+用户抱怨今天加班太晚，很累。你安慰了她，并答应明天周末带她去吃好吃的。</textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">兴趣爱好补充 (system_module8)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-sys-module8" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动匹配</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-module8', '兴趣爱好补充')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-module8" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">名人角色设定 (system_Role_acting)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-sys-role-acting-module', '名人角色设定')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-sys-role-acting" class="form-control" style="display:none"></textarea>
+              <textarea id="f-sys-role-acting-module" class="form-control" style="display:none"></textarea>
+            </div>
+            <div class="form-item" style="margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label class="form-label" style="margin:0">语音条禁用规则 (voice_forbidden)</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span id="badge-voice-forbidden" class="status-badge"
+                    style="font-size:10px;padding:2px 6px;background:var(--bg-hover);color:var(--text-secondary)">自动填充</span>
+                  <button class="btn btn-secondary" style="padding:2px 6px;font-size:12px"
+                    onclick="openModuleEditor('f-voice-forbidden', '语音条禁用规则')" title="编辑模块">✏️</button>
+                </div>
+              </div>
+              <textarea id="f-voice-forbidden" class="form-control" style="display:none"></textarea>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div style="display:none" aria-hidden="true">
+          <select id="f-sp-import-list" class="form-control">
+            <option value="">-- 隐藏旧入口，不再使用 --</option>
+          </select>
+          <textarea id="f-system-prompt" class="form-control"></textarea>
+          <div id="sp-variable-preview"></div>
+          <div id="generation-control-storage">
+            <div class="generation-card">
+              <div class="generation-preset-tabs" role="tablist" aria-label="生成多样性预设">
+                <button type="button" id="btn-generation-preset-precise" class="generation-preset-btn"
+                  onclick="setGenerationPreset('precise')">精准模式</button>
+                <button type="button" id="btn-generation-preset-balanced" class="generation-preset-btn"
+                  onclick="setGenerationPreset('balanced')">平衡模式</button>
+                <button type="button" id="btn-generation-preset-creative" class="generation-preset-btn"
+                  onclick="setGenerationPreset('creative')">创意模式</button>
+                <button type="button" id="btn-generation-preset-custom" class="generation-preset-btn"
+                  onclick="setGenerationPreset('custom')">自定义</button>
+              </div>
+              <input type="range" id="f-temperature-range" class="generation-range" min="0" max="2" step="0.05"
+                value="1" oninput="syncGenerationField('temperature', this.value, 'range')">
+              <input type="number" id="f-temperature" class="form-control generation-number-input" min="0"
+                max="2" step="0.05" value="1" oninput="syncGenerationField('temperature', this.value, 'number')">
+              <input type="range" id="f-top-p-range" class="generation-range" min="0" max="1" step="0.05"
+                value="0.95" oninput="syncGenerationField('top_p', this.value, 'range')">
+              <input type="number" id="f-top-p" class="form-control generation-number-input" min="0" max="1"
+                step="0.05" value="0.95" oninput="syncGenerationField('top_p', this.value, 'number')">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-params" class="tab-content">
+        <div class="form-group">
+          <div class="group-title">模型配置</div>
+          <select id="f-model-pro" class="form-control" style="display:none"></select>
+          <div class="form-item">
+            <label class="form-label">摘要模型</label>
+            <select id="f-model-mini" class="form-control"></select>
+          </div>
+          <div class="form-item">
+            <label class="form-label">打分模型</label>
+            <select id="f-scoring-model" class="form-control"></select>
+          </div>
+          <div class="form-item">
+            <label class="form-label">画像模型</label>
+            <select id="f-profile-model" class="form-control"></select>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-item">
+              <label class="form-label">对话思考</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+                  <input type="checkbox" id="f-thinking-enabled" onchange="onDialogueThinkingEnabledChange()"> 开启
+                </label>
+                <select id="f-thinking-effort" class="form-control" onchange="onDialogueThinkingEffortChange()">
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high" selected>高</option>
+                </select>
+              </div>
+              <div id="f-thinking-support-hint" style="margin-top:6px;font-size:12px;color:var(--text-tertiary)">默认深度：high</div>
+            </div>
+            <div class="form-item">
+              <label class="form-label">打分思考</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+                  <input type="checkbox" id="f-scoring-thinking-enabled" onchange="onScoringThinkingEnabledChange()"> 开启
+                </label>
+                <select id="f-scoring-thinking-effort" class="form-control" onchange="onScoringThinkingEffortChange()">
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high" selected>高</option>
+                </select>
+              </div>
+              <div id="f-scoring-thinking-support-hint" style="margin-top:6px;font-size:12px;color:var(--text-tertiary)">默认深度：high</div>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="group-title">提示词配置</div>
+          <div class="form-item">
+            <label class="form-label">主提示词版本</label>
+            <div class="prompt-select-row">
+              <select id="f-prompt-version" class="form-control">
+                <option value="">自动加载最新提示词（服务器判定）</option>
+              </select>
+              <button id="btn-chat-prompt-edit" class="btn btn-secondary" type="button"
+                onclick="openRuntimePromptEditor('chat')">编辑</button>
+              <button id="btn-chat-prompt-preview" class="btn btn-secondary" type="button"
+                onclick="previewRuntimePrompt('chat')">预览</button>
+            </div>
+          </div>
+          <div class="form-item">
+            <label class="form-label">摘要提示词版本</label>
+            <div class="prompt-select-row">
+              <select id="f-summary-prompt-version" class="form-control">
+                <option value="">自动加载最新提示词（服务器判定）</option>
+              </select>
+              <button class="btn btn-secondary" type="button" onclick="openRuntimePromptEditor('summary')">编辑</button>
+              <button class="btn btn-secondary" type="button" onclick="previewRuntimePrompt('summary')">预览</button>
+            </div>
+          </div>
+          <div class="form-item">
+            <label class="form-label">打分提示词版本</label>
+            <div class="prompt-select-row">
+              <select id="f-scoring-prompt-version" class="form-control">
+                <option value="">自动加载最新提示词（服务器判定）</option>
+              </select>
+              <button class="btn btn-secondary" type="button" onclick="openRuntimePromptEditor('scoring')">编辑</button>
+              <button class="btn btn-secondary" type="button" onclick="previewRuntimePrompt('scoring')">预览</button>
+            </div>
+          </div>
+          <div class="form-item">
+            <label class="form-label">画像提示词版本</label>
+            <div class="prompt-select-row">
+              <select id="f-profile-prompt-version" class="form-control">
+                <option value="">自动加载最新提示词（服务器判定）</option>
+              </select>
+              <button class="btn btn-secondary" type="button" onclick="openRuntimePromptEditor('profile')">编辑</button>
+              <button class="btn btn-secondary" type="button" onclick="previewRuntimePrompt('profile')">预览</button>
+            </div>
+          </div>
+          <textarea id="f-system-prompt-shadow" class="form-control" style="display:none"></textarea>
+        </div>
+        <div class="form-group">
+          <div class="group-title">运行参数</div>
+          <div class="form-grid-2">
+            <div class="form-item">
+              <label class="form-label">摘要间隔</label>
+              <input type="number" id="f-summary-interval" class="form-control" value="10" min="1" max="20"
+                title="每隔N轮自动生成摘要">
+            </div>
+            <div class="form-item">
+              <label class="form-label" for="f-injection-depth">注入深度
+                <span style="cursor:help;color:var(--text-tertiary)" title="角色深度锚定在历史消息中的插入位置（从末尾倒数第N条）；2=倒数第2条，数值越大越靠前，可自定义"
+                  role="button" tabindex="0" onclick="showInjectionDepthHelp()"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showInjectionDepthHelp();}">ⓘ</span>
+              </label>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 32px;gap:8px;align-items:stretch">
+                <input type="number" id="f-injection-depth" class="form-control" value="4" min="1" step="1"
+                  inputmode="numeric" aria-describedby="injection-depth-help-text"
+                  title="2=倒数第2条，3=倒数第3条；推荐 2/3/4/5，可自定义">
+                <div style="display:grid;grid-template-rows:1fr 1fr;gap:4px">
+                  <button type="button" id="btn-injection-depth-inc" class="btn btn-secondary"
+                    style="min-width:0;padding:0;font-size:12px;line-height:1" onclick="adjustInjectionDepth(1)"
+                    title="增加注入深度">▲</button>
+                  <button type="button" id="btn-injection-depth-dec" class="btn btn-secondary"
+                    style="min-width:0;padding:0;font-size:12px;line-height:1" onclick="adjustInjectionDepth(-1)"
+                    title="减少注入深度">▼</button>
+                </div>
+              </div>
+              <div id="injection-depth-help-text"
+                style="margin-top:6px;font-size:12px;color:var(--text-tertiary);line-height:1.5">
+                角色深度锚定插入到历史消息中的位置：`2` 表示倒数第 2 条，数值越大，插入位置越靠前。推荐 `2/3/4/5`，也支持自定义。
+              </div>
+              <datalist id="injection-depth-options">
+                <option value="2"></option>
+                <option value="3"></option>
+                <option value="4"></option>
+                <option value="5"></option>
+              </datalist>
+            </div>
+          </div>
+          <input type="checkbox" id="f-dryrun" style="display:none">
+        </div>
+      </div>
+
+
+      <div style="padding:12px 16px;border-top:1px solid var(--border-light);background:var(--bg-surface);display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-primary" id="btn-start" style="width:100%;justify-content:center;padding:12px"
+          onclick="saveConfigAndStartChat()">💬
+          开始对话</button>
+        <div id="btn-save-template-menu" style="position:relative;">
+          <div style="display:flex;gap:1px;border-radius:6px;overflow:hidden;">
+            <button class="btn btn-secondary" id="btn-save-preset"
+              style="flex:1;justify-content:center;padding:8px;border-radius:6px 0 0 6px;font-size:12px" onclick="saveAsPreset()">💾 保存为模板</button>
+            <button class="btn btn-secondary" id="btn-save-template-toggle" type="button"
+              style="padding:8px 10px;border-radius:0 6px 6px 0;font-size:10px;border-left:1px solid var(--border-light)" onclick="toggleTemplateSaveMenu()">▾</button>
+          </div>
+          <div id="template-save-dropdown" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:8px;box-shadow:0 -4px 12px rgba(0,0,0,.08);padding:4px;z-index:50;">
+            <button class="btn btn-secondary" type="button" data-template-type="preset"
+              style="width:100%;justify-content:flex-start;padding:8px 12px;font-size:12px;border-radius:6px" onclick="saveCurrentTemplate('preset');toggleTemplateSaveMenu()">📋 角色模板</button>
+            <button class="btn btn-secondary" type="button" data-template-type="runtime"
+              style="width:100%;justify-content:flex-start;padding:8px 12px;font-size:12px;border-radius:6px" onclick="saveCurrentTemplate('runtime');toggleTemplateSaveMenu()">⚙️ 参数模板</button>
+            <button class="btn btn-secondary" type="button" data-template-type="full"
+              style="width:100%;justify-content:flex-start;padding:8px 12px;font-size:12px;border-radius:6px" onclick="saveCurrentTemplate('full');toggleTemplateSaveMenu()">📦 完整模板</button>
+          </div>
+        </div>
+      </div>
+  </aside>
+
+  <div id="modal-sp-edit" class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="runtime-prompt-editor-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+    <div
+      style="background:var(--bg-surface);width:90%;max-width:960px;max-height:90vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+      <div
+        style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;background:var(--bg-surface);">
+        <h3 style="margin:0;font-weight:600" id="runtime-prompt-editor-title">提示词编辑器</h3>
+        <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+          onclick="closeModal('modal-sp-edit')">×</button>
+      </div>
+      <div class="runtime-prompt-editor-body">
+        <div class="runtime-prompt-editor-layout">
+          <div class="runtime-prompt-editor-main">
+            <textarea id="fs-sp-editor" class="form-control runtime-prompt-editor-textarea"
+              style="font-family:monospace;font-size:12px"></textarea>
+          </div>
+          <aside id="runtime-prompt-editor-aside" class="prompt-editor-aside" style="display:none">
+            <section id="runtime-prompt-editor-generation" class="prompt-editor-sidebar-section prompt-editor-sidebar-section-fixed" style="display:none">
+              <div class="prompt-editor-section-title">生成多样性</div>
+              <div class="generation-card compact">
+                <div class="generation-preset-tabs" role="tablist" aria-label="单模型生成多样性预设">
+                  <button type="button" id="sp-btn-generation-preset-precise" class="generation-preset-btn"
+                    onclick="setGenerationPreset('precise')">精准模式</button>
+                  <button type="button" id="sp-btn-generation-preset-balanced" class="generation-preset-btn"
+                    onclick="setGenerationPreset('balanced')">平衡模式</button>
+                  <button type="button" id="sp-btn-generation-preset-creative" class="generation-preset-btn"
+                    onclick="setGenerationPreset('creative')">创意模式</button>
+                  <button type="button" id="sp-btn-generation-preset-custom" class="generation-preset-btn"
+                    onclick="setGenerationPreset('custom')">自定义</button>
+                </div>
+                <div class="generation-slider-row">
+                  <label class="form-label generation-slider-label" for="sp-temperature">生成随机性
+                    <span class="generation-help" title="值越高越发散，值越低越稳定。">ⓘ</span>
+                  </label>
+                  <div class="generation-slider-control">
+                    <input type="range" id="sp-temperature-range" class="generation-range" min="0" max="2" step="0.05"
+                      value="1" oninput="syncGenerationField('temperature', this.value, 'range')">
+                    <div class="generation-number-group">
+                      <input type="number" id="sp-temperature" class="form-control generation-number-input" min="0"
+                        max="2" step="0.05" value="1" oninput="syncGenerationField('temperature', this.value, 'number')">
+                      <button type="button" class="generation-adjust-btn" onclick="adjustGenerationField('temperature', -0.05)">-</button>
+                      <button type="button" class="generation-adjust-btn" onclick="adjustGenerationField('temperature', 0.05)">+</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="generation-slider-row">
+                  <label class="form-label generation-slider-label" for="sp-top-p">Top P
+                    <span class="generation-help" title="控制采样范围，值越高越开放。">ⓘ</span>
+                  </label>
+                  <div class="generation-slider-control">
+                    <input type="range" id="sp-top-p-range" class="generation-range" min="0" max="1" step="0.05"
+                      value="0.95" oninput="syncGenerationField('top_p', this.value, 'range')">
+                    <div class="generation-number-group">
+                      <input type="number" id="sp-top-p" class="form-control generation-number-input" min="0" max="1"
+                        step="0.05" value="0.95" oninput="syncGenerationField('top_p', this.value, 'number')">
+                      <button type="button" class="generation-adjust-btn" onclick="adjustGenerationField('top_p', -0.05)">-</button>
+                      <button type="button" class="generation-adjust-btn" onclick="adjustGenerationField('top_p', 0.05)">+</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section id="runtime-prompt-editor-vars" class="prompt-editor-sidebar-section prompt-editor-sidebar-section-fill" style="display:none">
+              <div class="prompt-editor-section-title">变量编辑</div>
+              <div id="runtime-prompt-editor-vars-body" class="runtime-prompt-editor-vars-body"></div>
+            </section>
+          </aside>
+        </div>
+        <div class="runtime-prompt-editor-actions">
+          <button class="btn btn-secondary" onclick="closeModal('modal-sp-edit')">取消</button>
+          <button id="btn-runtime-prompt-save" class="btn btn-primary" onclick="saveFullscreenSP()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-sp-preview" class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="runtime-prompt-preview-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:20px;">
+    <div
+      style="background:var(--bg-surface);width:90%;max-width:960px;max-height:90vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+      <div
+        style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;background:var(--bg-surface);">
+        <h3 style="margin:0;font-weight:600" id="runtime-prompt-preview-title">提示词预览</h3>
+        <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+          onclick="closeModal('modal-sp-preview')">×</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <div id="runtime-prompt-preview-meta"
+          style="display:none;padding:12px;border:1px solid var(--border-light);border-radius:10px;background:var(--bg-hover);font-size:12px;color:var(--text-secondary)"></div>
+        <pre id="sp-preview-content"
+          style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow:auto;font-family:monospace;font-size:12px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:8px;padding:16px"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-module-edit" class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="module-edit-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:20px;">
+    <div
+      style="background:var(--bg-surface);width:90%;max-width:960px;max-height:90vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.1)">
+      <div
+        style="padding:16px 24px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;background:var(--bg-surface);">
+        <h3 id="module-edit-title" style="margin:0;font-weight:600">编辑系统模块</h3>
+        <button style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-tertiary)"
+          onclick="closeModal('modal-module-edit')">×</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <textarea id="fs-module-editor" class="form-control"
+          style="min-height:420px;font-family:monospace;font-size:12px;resize:vertical"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px;color:var(--text-tertiary)">支持 Markdown 格式。手动修改后将覆盖自动匹配的内容。</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="closeModal('modal-module-edit')">取消</button>
+            <button class="btn btn-primary" onclick="saveModuleEdit()">确定</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <div id="modal-preset-delete" class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="preset-delete-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1200;align-items:center;justify-content:center;padding:20px;">
+    <div class="confirm-modal-card">
+      <div class="confirm-modal-header">
+        <h3 id="preset-delete-title">删除自定义模板</h3>
+        <button class="confirm-modal-close" type="button" onclick="closeModal('modal-preset-delete')">×</button>
+      </div>
+      <div class="confirm-modal-body">
+        <div id="preset-delete-message" class="confirm-modal-message">确定删除当前模板吗？</div>
+        <div class="confirm-modal-note">该操作不可撤销，删除后模板列表会立即刷新。</div>
+      </div>
+      <div class="confirm-modal-actions">
+        <button class="btn btn-secondary" type="button" onclick="closeModal('modal-preset-delete')">取消</button>
+        <button class="btn btn-danger" type="button" id="btn-confirm-delete-preset" onclick="confirmDeletePreset()">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-action-confirm" class="modal" role="dialog" aria-modal="true"
+    aria-labelledby="action-confirm-title" aria-hidden="true" tabindex="-1"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1200;align-items:center;justify-content:center;padding:20px;">
+    <div class="confirm-modal-card">
+      <div class="confirm-modal-header">
+        <h3 id="action-confirm-title">确认执行操作</h3>
+        <button class="confirm-modal-close" type="button" onclick="resolveActionConfirmDialog(false)">×</button>
+      </div>
+      <div class="confirm-modal-body">
+        <div id="action-confirm-message" class="confirm-modal-message">请确认是否继续。</div>
+        <div id="action-confirm-note" class="confirm-modal-note" style="display:none"></div>
+      </div>
+      <div class="confirm-modal-actions">
+        <button class="btn btn-secondary" type="button" onclick="resolveActionConfirmDialog(false)">取消</button>
+        <button class="btn btn-primary" type="button" id="btn-action-confirm" onclick="resolveActionConfirmDialog(true)">确认</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 批量重打分浮动进度条 -->
+  <div id="history-batch-rescore-progress" class="batch-rescore-float-bar" style="display:none">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        <span id="history-batch-rescore-spinner" class="batch-rescore-spinner" style="display:none"></span>
+        <span id="history-batch-rescore-title" style="font-size:13px;font-weight:600;white-space:nowrap">⏳ 批量重打分进行中</span>
+        <span id="history-batch-rescore-counter" style="font-size:12px;opacity:.7;font-weight:500">0 / 0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:12px">
+        <span id="history-batch-rescore-success-badge" style="color:#4ade80;font-weight:600;display:none">✓ <span id="history-batch-rescore-success-num">0</span> 成功</span>
+        <span id="history-batch-rescore-fail-badge" style="color:#f87171;font-weight:600;display:none">✗ <span id="history-batch-rescore-fail-num">0</span> 失败</span>
+        <button class="btn btn-secondary" id="history-batch-rescore-cancel-btn" onclick="cancelBatchRescore()" style="padding:2px 10px;font-size:11px;color:#fbbf24;border-color:#fbbf24">取消</button>
+        <button class="btn btn-secondary" id="history-batch-rescore-dismiss-btn" onclick="dismissBatchRescoreProgress()" style="display:none;padding:2px 10px;font-size:11px">关闭</button>
+      </div>
+    </div>
+    <div class="batch-rescore-float-track">
+      <div id="history-batch-rescore-fill" class="batch-rescore-float-fill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- 历史摘要任务浮动进度条 -->
+  <div id="history-summary-task-progress" class="batch-rescore-float-bar" style="display:none;bottom:112px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        <span id="history-summary-task-spinner" class="batch-rescore-spinner" style="display:none"></span>
+        <span id="history-summary-task-title" style="font-size:13px;font-weight:600;white-space:nowrap">🧠 历史摘要生成中</span>
+        <span id="history-summary-task-counter" style="font-size:12px;opacity:.7;font-weight:500">0 / 0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:12px">
+        <span id="history-summary-task-detail" style="color:var(--text-secondary)">等待开始</span>
+        <button class="btn btn-secondary" id="history-summary-task-dismiss-btn"
+          onclick="dismissHistorySummaryTaskProgress()" style="display:none;padding:2px 10px;font-size:11px">关闭</button>
+      </div>
+    </div>
+    <div class="batch-rescore-float-track">
+      <div id="history-summary-task-fill" class="batch-rescore-float-fill" style="width:0%"></div>
+    </div>
+  </div>
+  <script src="js/legacy_bundle.js?v=94" defer></script>
+</body>
+
+</html>
+

@@ -1,0 +1,6 @@
+馃殌 寮€濮嬬鍒扮 UI 鑷姩鍖栨祴璇?..
+姝ｅ湪瀵艰埅骞剁瓑寰呴〉闈㈠姞杞? http://localhost:8000/static/index.html
+鉂?娴嬭瘯鍙戠敓寮傚父: Locator.text_content: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("#header-model-name")
+

@@ -1,0 +1,29 @@
+============================================================
+  需求1：MiniMax M2.7 模型注册验证
+============================================================
+  [PASS] minimax-m27 已注册
+  [PASS] minimax-m27-hs 已注册
+  [PASS] M2.7 display_name 正确 — MiniMax M2.7
+  [PASS] M2.7-hs display_name 正确 — MiniMax M2.7 极速
+  [PASS] M2.7 thinking=True
+  [PASS] M2.7-hs thinking=True
+  [PASS] M2.7 web_search=False
+  [PASS] M2.7 provider=aliyun (OpenAI兼容)
+  [PASS] M2.5 和 Her 仍保留
+
+============================================================
+  需求2：预设角色 Few-shot 路径验证
+============================================================
+  [PASS] xiaoJingYan few_shot 路径正确
+  [PASS] guChenXi few_shot 路径正确
+  [PASS] luHanZe few_shot 路径正确
+  [PASS] suTangTang few_shot 路径正确
+  [PASS] xiaoZhan few_shot 路径正确
+  [PASS] chiCheng few_shot 路径正确
+  [PASS] yuMianGui few_shot 路径正确
+  [PASS] 变量接口 longform_few_shot 指向新目录 — 示例——长文模式/霸道腹黑型男性 Few-shot 示例.md
+  [PASS] 无旧路径残留 (longform_few_shot_)
+
+============================================================
+  总结: 18 passed, 0 failed
+============================================================

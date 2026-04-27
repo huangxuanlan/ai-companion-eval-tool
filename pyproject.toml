@@ -1,0 +1,31 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = [
+  "dist",
+  "output",
+  "backups",
+  ".runtime",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/ci.py" = ["I001"]
+"tests/_loader.py" = ["I001"]
+"server/database.py" = ["E501", "I001"]
+"server/routers/conversations.py" = ["E501", "I001"]
+"server/services/conversation_generation.py" = ["E501", "I001"]
+"server/services/conversation_runtime.py" = ["E501", "I001"]
+"server/services/conversation_service.py" = ["E501", "I001"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

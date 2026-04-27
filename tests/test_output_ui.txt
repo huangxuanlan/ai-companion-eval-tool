@@ -1,0 +1,33 @@
+[PASS] A2 鍥涢」瀵艰埅瀛樺湪 | 瀵硅瘽浣撻獙,娴嬭瘯涓績,鎻愮ず璇嶇鐞?鍘嗗彶璁板綍
+[PASS] A5 渚ф爮鎶樺彔 | collapsed=True
+[PASS] B6 鍙充晶闈㈡澘榛樿鍙 | display=flex
+[FAIL] B2 椤堕儴瑙掕壊鍚嶆樉绀?| 椤甸潰鏈壘鍒扳€滆鑹?鈥濇枃妗?
+[PASS] B1 椤堕儴妯″瀷閫夋嫨鍣?| #header-global-model
+[PASS] B3 娓呴櫎涓婁笅鏂囨寜閽瓨鍦?| #btn-clear-chat
+[PASS] B4 妯″瀷瀵规瘮鎸夐挳瀛樺湪 | #btn-toggle-compare
+[PASS] B5 鏂板缓浼氳瘽鎸夐挳瀛樺湪 | #btn-new-chat
+[PASS] C1 瑙掕壊/鍙傛暟 Tab 鍒囨崲 | tab-params visible=True
+[FAIL] D4 娉ㄥ叆娣卞害鏋氫妇绗﹀悎PRD | 2锛堥粯璁わ級|3|4|5
+[PASS] D7 鎽樿妯″瀷瀛樺湪 | #f-model-mini
+[PASS] D0b 鎻愮ず璇嶇増鏈瓨鍦?| #f-prompt-version
+[PASS] E1 鑱婂ぉ椤佃仈缃戝紑鍏?| #f-web-search-chat
+[PASS] E3 鑱婂ぉ椤垫€濊€冩繁搴?| #f-thinking-effort-chat
+[PASS] E6 鍙戦€佹寜閽瓨鍦?| #btn-chat-send
+[PASS] G7 妯″瀷瀵规瘮妯″紡鍙繘鍏?| freechat=True
+[PASS] G9 妯″瀷瀵规瘮妯″紡鍙€€鍑?| chat=True
+[PASS] H1 娴嬭瘯涓績鍙繘鍏?| test-center=True
+[PASS] H2/H3 娴嬭瘯涓績涓籘ab瀛樺湪 | 馃搵 鎵归噺娴嬭瘯|鈿栵笍 妯″瀷妯悜瀵规瘮|馃И 鎻愮ず璇岮/B瀵规瘮
+[PASS] H14 涓婁紶宸叉湁杈撳嚭鍏ュ彛瀛樺湪 | #batch-output-input
+[PASS] H10/H11 鍘嗗彶瀵规瘮妯″紡鍒囨崲 | history-mode=True
+[PASS] J1 鎻愮ず璇嶇鐞嗗彲杩涘叆 | prompts=True
+[PASS] J8 鎻愮ず璇嶅鍏ユ帶浠?| #prompt-upload-input
+[PASS] K1 鍘嗗彶璁板綍鍙繘鍏?| history=True
+[PASS] K3 瑙掕壊绛涢€夊瓨鍦?| #history-filter-role
+[PASS] K3 妯″瀷绛涢€夊瓨鍦?| #history-filter-model
+[PASS] K3 鎻愮ず璇嶇瓫閫夊瓨鍦?| #history-filter-prompt
+[PASS] C19 妯℃澘涓嬭浇閾炬帴鏈夋晥 | {'鍙橀噺妯℃澘': '/api/configs/variables/template/export', '鎵撳垎妯℃澘': '/api/scoring/template/download', '瀵硅瘽妯℃澘': '/api/configs/export-template'}
+[FAIL] DOM 鏃犻噸澶?ID | f-sys-role-acting
+[PASS] 娴忚鍣?Console 鏃?error/warning
+[PASS] 椤甸潰杩愯鏃舵棤寮傚父
+
+UI 瀹屾暣鎬у啋鐑熺粨鏋? 28/31 閫氳繃, 3 澶辫触

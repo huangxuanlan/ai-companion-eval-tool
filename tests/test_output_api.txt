@@ -1,0 +1,7 @@
+  [PASS] L01 models contract - 20 models
+  [PASS] L11a prompts list - 11 prompts
+  [FAIL] L12
+  [PASS] K04 scoring template - status=200
+  [PASS] Config export template - status=200
+  [PASS] Variable template - status=200
+API: 5/6 passed

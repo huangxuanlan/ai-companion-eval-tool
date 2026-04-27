@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>V3.0 极简极夜版 · 长文模式多轮对话测试台</title>
+    <!-- 使用 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- Feather Icons for lightweight modern icons -->
+    <script src="https://unpkg.com/feather-icons"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // 手动控制 dark class
+            theme: {
+                extend: {
+                    colors: {
+                        // Semantic colors for both themes
+                        bg: {
+                            base: 'var(--bg-base)',
+                            panel: 'var(--bg-panel)',
+                            hover: 'var(--bg-hover)',
+                            input: 'var(--bg-input)'
+                        },
+                        border: {
+                            dim: 'var(--border-dim)',
+                            solid: 'var(--border-solid)',
+                            focus: 'var(--border-focus)'
+                        },
+                        text: {
+                            primary: 'var(--text-primary)',
+                            secondary: 'var(--text-secondary)',
+                            muted: 'var(--text-muted)'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            /* Light Theme Defaults (Day Mode) */
+            --bg-base: #F8FAFC;
+            --bg-panel: #FFFFFF;
+            --bg-hover: #F1F5F9;
+            --bg-input: #FFFFFF;
+
+            --border-dim: #E2E8F0;
+            --border-solid: #CBD5E1;
+            --border-focus: #94A3B8;
+
+            --text-primary: #0F172A;
+            --text-secondary: #475569;
+            --text-muted: #94A3B8;
+
+            --brand-accent: #0F172A;
+            --accent-blue: #3B82F6;
+            --accent-green: #10B981;
+
+            --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Consolas, monospace;
+        }
+
+        .dark {
+            /* Pure Black Minimalist Theme (Night Mode) */
+            --bg-base: #000000;
+            --bg-panel: #0A0A0A;
+            --bg-hover: #171717;
+            --bg-input: #0A0A0A;
+
+            --border-dim: #222222;
+            --border-solid: #333333;
+            --border-focus: #555555;
+
+            --text-primary: #EDEDED;
+            --text-secondary: #A1A1AA;
+            --text-muted: #52525B;
+
+            --brand-accent: #FFFFFF;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-ui);
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            /* 移除多余的花哨背景，回归纯粹性能 */
+        }
+
+        /* 极简边框系统面板 */
+        .panel {
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-dim);
+            /* 只有微妙的细边阴影提升层次级，没有大面积模糊 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+
+        /* 高级悬停反馈 */
+        .interactive-element {
+            transition: all 0.15s ease-out;
+        }
+
+        .interactive-element:hover {
+            background-color: var(--bg-hover);
+            border-color: var(--border-solid);
+        }
+
+        /* 开发者友好型滚动条 */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-solid);
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-focus);
+        }
+
+        /* 极简点状加载 (替代发光动画) */
+        .dot-flashing {
+            position: relative;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background-color: var(--text-secondary);
+            color: var(--text-secondary);
+            animation: dot-flashing 1s infinite linear alternate;
+            animation-delay: 0.5s;
+        }
+
+        .dot-flashing::before,
+        .dot-flashing::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            top: 0;
+        }
+
+        .dot-flashing::before {
+            left: -10px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background-color: var(--text-secondary);
+            animation: dot-flashing 1s infinite alternate;
+            animation-delay: 0s;
+        }
+
+        .dot-flashing::after {
+            left: 10px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background-color: var(--text-secondary);
+            animation: dot-flashing 1s infinite alternate;
+            animation-delay: 1s;
+        }
+
+        @keyframes dot-flashing {
+            0% {
+                background-color: var(--text-secondary);
+            }
+
+            50%,
+            100% {
+                background-color: rgba(161, 161, 170, 0.2);
+            }
+        }
+
+        /* Mono typography helper */
+        .font-mono-tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+    </style>
+    <!-- Prevent FOUC (Flash of Unstyled Content) for theme -->
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+</head>
+
+<body class="flex flex-col antialiased h-screen transition-colors duration-200">
+
+    <!-- 极简全局顶栏 -->
+    <header
+        class="h-12 border-b border-border-dim bg-bg-panel flex items-center justify-between px-4 shrink-0 transition-colors">
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 font-mono text-xs tracking-tight">
+                <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                <span class="text-text-primary font-semibold">Longform Validator</span>
+                <span class="text-text-muted">v3.0.0-beta</span>
+            </div>
+
+            <div class="h-4 w-px bg-border-solid mx-2"></div>
+
+            <!-- 顶部分发导航 (Segment Control Style) -->
+            <nav class="flex gap-1" id="top-nav">
+                <button
+                    class="nav-btn active px-3 py-1.5 text-xs text-bg-base bg-text-primary rounded-md font-medium shadow-sm border border-border-solid transition-colors">对话基准测试</button>
+                <button
+                    class="nav-btn px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded-md transition-colors">对比与分析(P3-P4)</button>
+                <button
+                    class="nav-btn px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded-md transition-colors">调用日志</button>
+            </nav>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button id="theme-toggle"
+                class="flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors w-7 h-7"
+                title="切换昼夜模式">
+                <i data-feather="sun" class="w-3.5 h-3.5 hidden dark:block"></i>
+                <i data-feather="moon" class="w-3.5 h-3.5 block dark:hidden"></i>
+            </button>
+            <button
+                class="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors py-1 px-2">
+                <i data-feather="settings" class="w-3.5 h-3.5"></i> 设置
+            </button>
+            <button id="run-test-btn"
+                class="flex items-center justify-center bg-text-primary text-bg-base text-xs font-semibold px-3 py-1.5 rounded-md hover:bg-brand-accent/90 transition-colors focus:ring-2 ring-brand-accent/20 ring-offset-1 ring-offset-bg-base min-w-[155px]">
+                开始回归测试 (Ctrl+Enter)
+            </button>
+        </div>
+    </header>
+
+    <!-- 三栏核心工作区布局恢复 (回归生产力设计) -->
+    <main class="flex-1 flex overflow-hidden bg-bg-base">
+
+        <!-- 左侧栏: P1 参数注入与预设配置 -->
+        <aside
+            class="w-[320px] bg-bg-panel border-r border-border-dim p-4 flex flex-col gap-4 overflow-y-auto shrink-0 transition-colors">
+            <div class="flex items-center justify-between">
+                <h2 class="text-xs font-semibold text-text-secondary tracking-wide uppercase">Context Injection</h2>
+                <button class="text-xs text-text-muted hover:text-text-primary transition-colors"><i
+                        data-feather="download" class="w-3.5 h-3.5"></i></button>
+            </div>
+
+            <div class="panel p-3">
+                <div class="text-xs text-text-secondary mb-2 flex justify-between items-center">
+                    <span>Active Preset</span>
+                    <span
+                        class="font-mono-tag bg-bg-hover px-1.5 py-0.5 rounded border border-border-dim text-text-primary">.xlsx
+                        mapped</span>
+                </div>
+                <!-- 移除了硬编码颜色，改用语义化变量 -->
+                <select
+                    class="w-full bg-bg-input border border-border-solid text-sm text-text-primary rounded px-2.5 py-1.5 focus:border-border-focus focus:outline-none appearance-none cursor-pointer transition-colors shadow-sm">
+                    <option>霸道腹黑 / 萧璟言 / 暧昧期</option>
+                    <option>理性沉稳 / 顾明远 / 热恋期</option>
+                    <option>可爱活泼 / 林萧 / 破冰期</option>
+                </select>
+            </div>
+
+            <div class="h-px bg-border-dim w-full my-2"></div>
+
+            <h3 class="text-[11px] font-semibold text-text-muted tracking-wider uppercase">System Parameters</h3>
+
+            <div class="flex flex-col gap-3">
+                <!-- 模型选择 (简化) -->
+                <div>
+                    <label class="text-[11px] text-text-secondary block mb-1">Target Models (Parallel)</label>
+                    <div class="flex flex-col gap-1">
+                        <label
+                            class="flex items-center gap-2 p-1.5 rounded hover:bg-bg-hover cursor-pointer transition-colors">
+                            <input type="checkbox" checked
+                                class="accent-brand-accent cursor-pointer bg-transparent border-border-solid">
+                            <span class="text-xs text-text-primary">Doubao-Pro-32k</span>
+                        </label>
+                        <label
+                            class="flex items-center gap-2 p-1.5 rounded hover:bg-bg-hover cursor-pointer transition-colors">
+                            <input type="checkbox" checked class="accent-brand-accent cursor-pointer">
+                            <span class="text-xs text-text-primary">DeepSeek-V3</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 变量注入快照 -->
+                <div>
+                    <label class="text-[11px] text-text-secondary block mb-1 flex justify-between">
+                        <span>Variables</span>
+                        <a href="#" class="text-accent-blue hover:underline">Edit JSON</a>
+                    </label>
+                    <div
+                        class="font-mono text-[10px] text-text-secondary bg-bg-input p-2.5 rounded border border-border-dim overflow-x-auto leading-relaxed transition-colors shadow-inner">
+                        <span class="text-accent-blue">"user_name"</span>: <span
+                            class="dark:text-[#CE9178] text-[#A31515]">"晚樱"</span>,<br>
+                        <span class="text-accent-blue">"relationship"</span>: <span
+                            class="dark:text-[#CE9178] text-[#A31515]">"暧昧拉扯"</span>,<br>
+                        <span class="text-accent-blue">"environment"</span>: <span
+                            class="dark:text-[#CE9178] text-[#A31515]">"江边艺术展"</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 中栏: P2 主交互长文游乐场 (纯净阅读体验) -->
+        <section class="flex-1 bg-bg-base flex flex-col min-w-[500px] transition-colors relative">
+            <!-- 模型状态控制条 -->
+            <div
+                class="h-10 border-b border-border-dim flex items-center px-4 gap-4 bg-bg-panel/90 backdrop-blur-sm sticky top-0 z-10 transition-colors">
+                <div class="text-[10px] uppercase font-semibold text-text-muted tracking-wider mr-2">Streams</div>
+
+                <div
+                    class="flex items-center gap-2 px-2.5 py-1 bg-bg-hover border border-border-solid rounded-sm cursor-pointer shadow-sm transition-colors">
+                    <div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                    <span class="text-xs font-mono text-text-primary">doubao-pro</span>
+                </div>
+
+                <div
+                    class="flex items-center gap-2 px-2.5 py-1 bg-bg-panel border border-border-dim rounded-sm cursor-pointer opacity-70 transition-colors">
+                    <!-- 生成中指示器 -->
+                    <div class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></div>
+                    <span class="text-xs font-mono text-text-secondary">deepseek-v3 </span>
+                </div>
+            </div>
+
+            <!-- 对话滚动视窗 -->
+            <div class="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col gap-8 pb-32">
+
+                <!-- System prompt marker -->
+                <div class="flex justify-center">
+                    <span
+                        class="text-[10px] font-mono text-text-muted bg-bg-panel border border-border-dim px-2 py-0.5 rounded-full uppercase shadow-sm">
+                        Session _0a4b9xf initialized
+                    </span>
+                </div>
+
+                <!-- User Bubble (Minimalist) -->
+                <div class="flex flex-col items-end gap-1">
+                    <span class="text-[10px] text-text-muted font-mono mr-1">User / 19:42:01</span>
+                    <div
+                        class="max-w-[85%] bg-bg-hover border border-border-solid text-text-primary py-3 px-4 rounded-xl rounded-tr-sm text-sm leading-relaxed shadow-sm transition-colors">
+                        晚风吹得很舒服呢，江边有个品牌方的艺术灯光秀，顺路过去走走吧？
+                    </div>
+                </div>
+
+                <!-- AI Bubble (Doubao Pro) - Completed -->
+                <div class="flex flex-col items-start gap-1 group">
+                    <div class="flex items-center gap-2 ml-1">
+                        <span class="text-[10px] text-text-secondary font-mono font-semibold">Doubao-Pro</span>
+                        <span
+                            class="text-[9px] text-text-muted font-mono border border-border-dim bg-bg-panel px-1 rounded shadow-sm">687c
+                            /
+                            4.2s</span>
+                        <!-- 交互挂点悬浮出现 -->
+                        <div class="hidden group-hover:flex items-center gap-1.5 ml-2">
+                            <i data-feather="copy"
+                                class="w-3 h-3 text-text-muted hover:text-text-primary cursor-pointer transition-colors"></i>
+                            <i data-feather="code"
+                                class="w-3 h-3 text-text-muted hover:text-text-primary cursor-pointer transition-colors"></i>
+                        </div>
+                    </div>
+
+                    <div
+                        class="max-w-[95%] w-full bg-bg-panel border border-border-dim text-text-primary py-4 px-5 rounded-xl rounded-tl-sm text-sm leading-7 selection:bg-brand-accent/20 shadow-sm transition-colors">
+                        <p class="text-text-secondary mb-3 italic">
+                            晚风卷着晚樱的甜香从落地窗钻进来，轻轻拂过你颊边的碎发。萧璟言原本正低头看着手里的平板，光影勾勒出他深邃冷峻的眉眼。听到你的声音，他骨节分明的手指微微一顿，将平板随手扣在桌面底座上。
+                        </p>
+
+                        <p class="mb-3 font-medium">「江边今晚有品牌方的灯光秀，顺路过去看看也可以。」</p>
+
+                        <p class="mb-3 text-text-secondary italic">
+                            他起身拿起搭在椅背上的黑色西装外套，深邃的眼眸倒映着你的身影。他迈开长腿走到你面前，抬手时，带着他特有极具侵略性的冷冽木质香瞬间将你包裹。手指极其自然地停在你额前两厘米的位置，不容拒绝地替你理了理被夜风吹乱的一缕散发。
+                        </p>
+
+                        <p class="font-medium">「穿上外套，江边风大。别指望感冒了我还会纵容你。」<span
+                                class="inline-block w-1.5 h-4 ml-1 bg-brand-accent align-middle animate-pulse"></span>
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Input Form Box -->
+            <div class="p-4 bg-bg-base border-t border-border-dim absolute bottom-0 w-full transition-colors">
+                <div class="max-w-4xl mx-auto flex items-end gap-2 relative shadow-lg rounded-lg">
+                    <div
+                        class="flex-1 bg-bg-input border border-border-solid focus-within:border-border-focus focus-within:ring-1 focus-within:ring-border-focus rounded-lg transition-all overflow-hidden bg-white dark:bg-[#0A0A0A]">
+                        <textarea rows="1"
+                            class="w-full bg-transparent text-sm text-text-primary px-4 py-3 resize-none outline-none leading-normal placeholder-text-muted"
+                            placeholder="输入下一轮回复..."></textarea>
+                    </div>
+                    <button
+                        class="bg-brand-accent text-bg-base h-[46px] w-[46px] rounded-lg flex items-center justify-center hover:opacity-90 transition-opacity cursor-pointer shrink-0 shadow-sm">
+                        <i data-feather="arrow-up" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="text-center mt-2.5">
+                    <span class="text-[10px] text-text-muted font-mono">Press ⏎ to Send / ⇧+⏎ to Break Line</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 右侧栏: P6 核心级诊断工具台 (开发者向) -->
+        <aside class="w-[380px] bg-bg-panel border-l border-border-dim flex flex-col shrink-0 transition-colors">
+            <div
+                class="h-10 border-b border-border-dim flex items-center px-4 justify-between bg-bg-panel transition-colors">
+                <div class="flex items-center gap-2">
+                    <i data-feather="terminal" class="w-3.5 h-3.5 text-text-muted"></i>
+                    <span
+                        class="text-[11px] font-semibold text-text-secondary uppercase tracking-wider">Inspector</span>
+                </div>
+                <!-- 预警徽章 -->
+                <span
+                    class="bg-red-500/10 text-red-500 dark:text-red-400 border border-red-500/20 text-[9px] px-1.5 py-0.5 rounded font-mono shadow-sm">L5
+                    Retry Blocked</span>
+            </div>
+
+            <div class="flex-1 overflow-y-auto w-full">
+                <!-- Inspector Content Padded Area -->
+                <div class="p-4 text-xs font-mono space-y-6">
+
+                    <!-- Network View Window -->
+                    <div>
+                        <div class="text-text-muted mb-1.5 uppercase text-[10px] font-semibold tracking-wider">WebSocket
+                            Stream</div>
+                        <div class="panel p-3 border-border-dim bg-white dark:bg-black shadow-inner">
+                            <div class="flex justify-between text-text-secondary mb-2 items-center">
+                                <span
+                                    class="bg-bg-hover px-1.5 py-0.5 rounded border border-border-dim shadow-sm">Status:
+                                    RECEIVING</span>
+                                <div class="dot-flashing mr-2"></div>
+                            </div>
+                            <div
+                                class="text-accent-blue break-all bg-blue-50 dark:bg-blue-900/10 p-1.5 rounded text-[11px]">
+                                wss://api.x-platform.com/v1/chat/completions/stream?id=req_8f7v...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- JSON Tree Window -->
+                    <div>
+                        <div class="text-text-muted mb-1.5 uppercase text-[10px] font-semibold tracking-wider">Payload
+                            Trace [Turn 1]</div>
+                        <div class="bg-bg-panel border border-border-dim rounded-lg overflow-hidden shadow-sm">
+                            <div
+                                class="bg-bg-hover border-b border-border-dim px-3 py-1.5 flex items-center justify-between text-text-secondary">
+                                <span class="text-[10px] font-semibold tracking-wide uppercase">Raw JSON</span>
+                                <i data-feather="copy"
+                                    class="w-3.5 h-3.5 hover:text-text-primary cursor-pointer transition-colors"></i>
+                            </div>
+                            <!-- syntax highlighted JSON view -->
+                            <div
+                                class="p-3 text-text-primary whitespace-pre overflow-x-auto text-[11px] leading-relaxed bg-white dark:bg-[#0A0A0A]">
+                                {
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"model"</span>: <span
+                                    class="dark:text-[#CE9178] text-[#A31515]">"doubao-pro-32k"</span>,
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"temperature"</span>: <span
+                                    class="dark:text-[#B5CEA8] text-[#098658]">0.85</span>,
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"messages"</span>: [
+                                {
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"role"</span>: <span
+                                    class="dark:text-[#CE9178] text-[#A31515]">"system"</span>,
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"content"</span>: <span
+                                    class="dark:text-[#CE9178] text-[#A31515]">"你是萧璟言。..."</span>
+                                },
+                                {
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"role"</span>: <span
+                                    class="dark:text-[#CE9178] text-[#A31515]">"user"</span>,
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"content"</span>: <span
+                                    class="dark:text-[#CE9178] text-[#A31515]">"晚风吹得..."</span>
+                                }
+                                ],
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"quality_gates"</span>: {
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"min_length"</span>: <span
+                                    class="dark:text-[#B5CEA8] text-[#098658]">600</span>,
+                                <span class="dark:text-[#9CDCFE] text-[#001080]">"retry_on_fail"</span>: <span
+                                    class="dark:text-[#569CD6] text-[#0000FF]">true</span>
+                                }
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logs Window -->
+                    <div>
+                        <div class="text-text-muted mb-1.5 uppercase text-[10px] font-semibold tracking-wider">QA Engine
+                            Logs</div>
+                        <ul
+                            class="text-[10px] text-text-secondary space-y-2 pl-2 font-mono leading-relaxed border-l-2 border-border-dim bg-bg-panel/50 py-2 rounded-r">
+                            <li class="pl-2 border-l-2 border-transparent"><span
+                                    class="text-text-muted mr-1">[19:42:04]</span>
+                                Prompt injected with preset '霸道腹黑'</li>
+                            <li class="pl-2 border-l-2 border-transparent"><span
+                                    class="text-text-muted mr-1">[19:42:05]</span>
+                                Parallel routing started (2 models)</li>
+                            <li
+                                class="pl-2 border-l-2 border-green-500 bg-green-500/5 dark:bg-green-500/10 text-green-700 dark:text-green-400 py-1 shadow-[inset_1px_0_0_0_rgba(16,185,129,0.1)] rounded-r-sm">
+                                <span class="opacity-75 mr-1">[19:42:47]</span> [Doubao] Validation pass: Length=687
+                                (>=600)
+                            </li>
+                            <li
+                                class="pl-2 border-l-2 border-red-500 bg-red-500/5 dark:bg-red-500/10 flex flex-col py-1.5 shadow-[inset_1px_0_0_0_rgba(239,68,68,0.1)] rounded-r-sm">
+                                <div class="text-red-600 dark:text-red-400 font-semibold mb-0.5"><span
+                                        class="opacity-75 font-normal mr-1">[19:42:50]</span>[DeepSeek] Validation
+                                    FAILED:</div>
+                                <span class="text-red-700 dark:text-red-300 ml-16">Length=432 (Expected >= 600)</span>
+                                <span
+                                    class="text-orange-500 dark:text-orange-400 mt-1.5 ml-16 border border-orange-500/30 bg-orange-500/10 inline-block px-1.5 py-0.5 rounded w-fit shadow-sm">>>
+                                    Triggering Retry Block (1/2)</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- JS 初始化 Feather 图标 & 交互逻辑 -->
+    <script>
+        // Init Icons
+        feather.replace()
+
+        // Theme Toggle Logic
+        const themeToggleBtn = document.getElementById('theme-toggle');
+
+        themeToggleBtn.addEventListener('click', () => {
+            const isDark = document.documentElement.classList.contains('dark');
+
+            if (isDark) {
+                document.documentElement.classList.remove('dark');
+                localStorage.theme = 'light';
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.theme = 'dark';
+            }
+        });
+
+        // Demo Top Nav Toggling Mechanism 
+        const navBtns = document.querySelectorAll('#top-nav .nav-btn');
+        navBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                navBtns.forEach(b => {
+                    b.classList.remove('active', 'bg-text-primary', 'text-bg-base', 'border', 'border-border-solid', 'shadow-sm');
+                    b.classList.add('text-text-secondary', 'hover:text-text-primary', 'hover:bg-bg-hover');
+                });
+                const target = e.currentTarget;
+                target.classList.add('active', 'bg-text-primary', 'text-bg-base', 'border', 'border-border-solid', 'shadow-sm');
+                target.classList.remove('text-text-secondary', 'hover:text-text-primary', 'hover:bg-bg-hover');
+            });
+        });
+
+        // Demo Mock Logic to trigger the inspector view
+        const runTestBtn = document.getElementById('run-test-btn');
+        runTestBtn.addEventListener('click', () => {
+            // Update button state
+            runTestBtn.innerHTML = '<div class="w-3 h-3 bg-bg-base rounded-sm animate-pulse mr-2"></div> Running...';
+
+            // Populate the right side panel with mockup data
+            const inspectorPanel = document.getElementById('inspector-content');
+            inspectorPanel.innerHTML = `
+                <!-- Empty state before interactions -->
+                <div class="h-full flex flex-col items-center justify-center text-text-muted/50 p-6 text-center">
+                    <i data-feather="activity" class="w-8 h-8 mb-3 opacity-50"></i>
+                    <p class="text-xs uppercase tracking-wider font-semibold">Inspector Idle</p>
+                    <p class="text-[10px] mt-1">Waiting for session initialization...</p>
+                </div>`;
+
+            // Re-bind feather icons
+            feather.replace();
+
+            setTimeout(() => {
+                runTestBtn.innerHTML = '开始回归测试 (Ctrl+Enter)';
+            }, 3000);
+        });
+
+    </script>
+</body>
+
+</html>

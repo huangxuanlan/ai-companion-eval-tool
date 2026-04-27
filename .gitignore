@@ -1,0 +1,44 @@
+# === 运行时产物 ===
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.corrupted
+.runtime/
+.ruff_cache/
+.playwright-cli/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+
+# === 敏感配置 ===
+server/.env
+.env
+
+# === 日志 ===
+*.log
+*.err.log
+*.out.log
+
+# === 测试数据 & 运行产物 ===
+*.xlsx
+*.json
+!package.json
+!test_conversation_*.json
+output/
+萧璟言_*
+
+# === 构建产物 ===
+dist/
+scratch/
+
+# === IDE / OS ===
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# === PID 文件 ===
+*.pid
