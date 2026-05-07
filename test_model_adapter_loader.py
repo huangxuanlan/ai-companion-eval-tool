@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_DIR = Path(__file__).resolve().parent
 SERVER_DIR = PROJECT_DIR / "server"
@@ -271,3 +272,96 @@ def test_minimax_her_uses_dedicated_api_key_env(monkeypatch):
 
     assert provider.api_key == "her-key"
     assert provider.model_name == "M2-her"
+
+
+def test_deepseek_v4_models_are_registered_for_dashscope():
+    adapter = model_adapter.ModelAdapter()
+
+    models = {item["id"]: item for item in adapter.list_models()}
+
+    assert "deepseek-v4-flash" in models
+    assert "deepseek-v4-pro" in models
+    assert models["deepseek-v4-flash"]["provider"] == "aliyun"
+    assert models["deepseek-v4-flash"]["capabilities"]["thinking"] is True
+    assert adapter.normalize_model_id("deepseek-v4-pro") == "deepseek-v4-pro"
+
+
+def test_deepseek_v4_aliyun_provider_passes_reasoning_effort(monkeypatch):
+    captured: dict[str, object] = {}
+    aliyun_module = model_adapter._load_provider_module("aliyun")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="ok",
+                            reasoning_content="thinking",
+                        )
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=5),
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(aliyun_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+
+    adapter = model_adapter.ModelAdapter()
+    result = adapter.chat(
+        "deepseek-v4-pro",
+        [{"role": "user", "content": "hi"}],
+        thinking_effort="xhigh",
+    )
+
+    assert result.success is True
+    assert captured["model"] == "deepseek-v4-pro"
+    assert captured["reasoning_effort"] == "max"
+    assert captured["extra_body"]["enable_thinking"] is True
+
+
+def test_deepseek_v4_aliyun_provider_can_disable_thinking(monkeypatch):
+    captured: dict[str, object] = {}
+    aliyun_module = model_adapter._load_provider_module("aliyun")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="ok", reasoning_content="")
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=5),
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(aliyun_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+
+    adapter = model_adapter.ModelAdapter()
+    result = adapter.chat(
+        "deepseek-v4-flash",
+        [{"role": "user", "content": "hi"}],
+        thinking_effort="disabled",
+    )
+
+    assert result.success is True
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["extra_body"]["enable_thinking"] is False
+    assert "reasoning_effort" not in captured

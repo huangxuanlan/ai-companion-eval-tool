@@ -57,6 +57,8 @@ DIMENSION_DISPLAY = {
 }
 LIVE_SCORING_TIMEOUT_ENV = "SCORING_LIVE_REQUEST_TIMEOUT_S"
 LIVE_SCORING_DEFAULT_TIMEOUT_S = 25.0
+LIVE_SCORING_MAX_WORKERS_ENV = "SCORING_LIVE_MAX_WORKERS"
+LIVE_SCORING_DEFAULT_MAX_WORKERS = 6
 
 
 def _get_scoring():
@@ -85,10 +87,18 @@ def get_live_scoring_dispatcher() -> LiveScoringDispatcher:
                         )
                     ),
                 ),
-                24,
+                _resolve_live_scoring_max_workers(),
             ),
         )
     return _live_scoring_dispatcher
+
+
+def _resolve_live_scoring_max_workers() -> int:
+    raw = os.environ.get(LIVE_SCORING_MAX_WORKERS_ENV, str(LIVE_SCORING_DEFAULT_MAX_WORKERS))
+    try:
+        return max(1, min(int(raw), 24))
+    except (TypeError, ValueError):
+        return LIVE_SCORING_DEFAULT_MAX_WORKERS
 
 
 def _resolve_scoring_prompt_version(prompt_version: str | None = None) -> str:
@@ -979,6 +989,7 @@ async def enqueue_live_score_turn(
 
 async def enqueue_pending_live_scores(conv_id: str, *, config: dict | None = None) -> int:
     conversation = _get_visible_conversation_or_404(conv_id)
+    resolved_config = config or conversation.get("config", {})
     pending_turns = [
         int(result.get("turn", 0) or 0)
         for result in conversation.get("results", []) or []
@@ -987,7 +998,7 @@ async def enqueue_pending_live_scores(conv_id: str, *, config: dict | None = Non
     return await get_live_scoring_dispatcher().enqueue_pending(
         conv_id,
         pending_turns,
-        config=config or conversation.get("config", {}),
+        config=resolved_config,
     )
 
 

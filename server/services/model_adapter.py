@@ -179,7 +179,7 @@ class ModelAdapter:
         "local_openai": "local_openai",
     }
     GEMMA_MODEL_PREFIXES = ("gemma4-", "gemma-4-", "gemma4")
-    THINKING_LEVELS = frozenset({"disabled", "low", "medium", "high"})
+    THINKING_LEVELS = frozenset({"disabled", "low", "medium", "high", "max", "xhigh"})
     # 打分/摘要等分析型场景的默认 Thinking 级别
     DEFAULT_THINKING_BY_MODEL = {
         "gemma4-31b": "high",
@@ -362,6 +362,32 @@ class ModelAdapter:
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 0.95},
             "capabilities": {"web_search": False, "thinking": False},
+        },
+        "deepseek-v4-flash": {
+            "name": "deepseek-v4-flash",
+            "display_name": "DeepSeek V4 Flash",
+            "provider": "aliyun",
+            "api": {
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "${DASHSCOPE_API_KEY}",
+                "model_name": "deepseek-v4-flash",
+            },
+            "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 1.0},
+            "thinking": {"enabled": True, "supports_reasoning_effort": True},
+            "capabilities": {"web_search": False, "thinking": True},
+        },
+        "deepseek-v4-pro": {
+            "name": "deepseek-v4-pro",
+            "display_name": "DeepSeek V4 Pro",
+            "provider": "aliyun",
+            "api": {
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "${DASHSCOPE_API_KEY}",
+                "model_name": "deepseek-v4-pro",
+            },
+            "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 1.0},
+            "thinking": {"enabled": True, "supports_reasoning_effort": True},
+            "capabilities": {"web_search": False, "thinking": True},
         },
         "deepseek-v3": {
             "name": "deepseek-v3-250324",
@@ -626,6 +652,8 @@ class ModelAdapter:
     ) -> str:
         """按模型返回最终思考强度，避免 Gemma4 31B 默认落到 disabled。"""
         normalized = str(thinking_effort or "").strip().lower() or "disabled"
+        if normalized == "xhigh":
+            normalized = "max"
         if normalized not in cls.THINKING_LEVELS:
             normalized = "disabled"
         model_default = cls.DEFAULT_THINKING_BY_MODEL.get(cls.normalize_model_id(model_id))
@@ -641,6 +669,8 @@ class ModelAdapter:
         thinking_effort: str | None,
     ) -> str:
         normalized_effort = str(thinking_effort or "").strip().lower() or "disabled"
+        if normalized_effort == "xhigh":
+            normalized_effort = "max"
         if normalized_effort not in cls.THINKING_LEVELS:
             normalized_effort = "disabled"
         if thinking_enabled is False:
@@ -695,7 +725,7 @@ class ModelAdapter:
             call_kwargs = {}
             if web_search and caps.get("web_search", False):
                 call_kwargs["web_search"] = True
-            if thinking_effort != "disabled" and caps.get("thinking", False):
+            if caps.get("thinking", False):
                 call_kwargs["thinking_effort"] = thinking_effort
             if provider_retry_delays is not None:
                 call_kwargs["retry_delays"] = list(provider_retry_delays)

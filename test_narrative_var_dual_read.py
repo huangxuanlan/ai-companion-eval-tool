@@ -282,6 +282,20 @@ def test_load_few_shot_examples_filters_by_relationship_and_limits_pairs(prompt_
     assert messages[3]["content"] == "*暧昧亲密回复*"
 
 
+def test_few_shot_candidate_archive_filter_matches_named_archive_dirs():
+    service = PromptService()
+
+    assert service._is_archived_few_shot_candidate(
+        Path(r"E:\工作资料\产品资料\提示词资料\长文模式\提示词\长文模式提示词归档\理性沉稳型男性 Few-shot 示例.md")
+    )
+    assert service._is_archived_few_shot_candidate(
+        Path(r"E:\提效工具\长文模式生成\优化文档\历史归档_20260421\温暖陪伴型女性 Few-shot 示例.md")
+    )
+    assert not service._is_archived_few_shot_candidate(
+        Path(r"E:\工作资料\产品资料\提示词资料\长文模式\变量\长文模式叙事变量\示例——长文模式\温暖陪伴型女性 Few-shot 示例（精选版）_v17.md")
+    )
+
+
 def test_resolve_few_shot_reference_prefers_latest_file_with_relationship_match(
     prompt_sources,
     monkeypatch: pytest.MonkeyPatch,
@@ -331,6 +345,68 @@ def test_resolve_few_shot_reference_prefers_latest_file_with_relationship_match(
 
     assert lover_path.endswith("霸道腹黑型女性 Few-shot 示例（精选版）_v9_20260414.md")
     assert ambiguous_path.endswith("霸道腹黑型女性 Few-shot 示例（精选版）_v10_20260414.md")
+
+
+def test_resolve_few_shot_reference_excludes_archive_from_auto_selection(
+    prompt_sources,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    narrative_dir = prompt_sources["narrative_dir"]
+    few_shot_dir = narrative_dir / "示例——长文模式"
+    archive_dir = few_shot_dir / "归档"
+
+    active_path = few_shot_dir / "温暖陪伴型男性 Few-shot 示例（精选版）_v15.md"
+    archived_path = archive_dir / "温暖陪伴型男性 Few-shot 示例（精选版）_v20_20260428.md"
+    _write(
+        active_path,
+        """
+        ## 【温暖陪伴型 - 暧昧阶段 - 日常场景】
+        [User]
+        *active user*
+        [Assistant]
+        *active reply*
+        ---
+        """,
+    )
+    _write(
+        archived_path,
+        """
+        ## 【温暖陪伴型 - 暧昧阶段 - 日常场景】
+        [User]
+        *archived user*
+        [Assistant]
+        *archived reply*
+        ---
+        """,
+    )
+
+    monkeypatch.setattr(PromptService, "FEW_SHOT_SOURCE_ROOTS", [few_shot_dir])
+    monkeypatch.setattr(PromptService, "FEW_SHOT_SEARCH_PATHS", [few_shot_dir])
+
+    service = PromptService()
+    resolved, display_path = service.resolve_few_shot_reference(
+        "",
+        personal_type="温暖陪伴",
+        gender="男",
+        relationship="暧昧",
+    )
+    auto_messages = service.load_few_shot_examples(
+        "",
+        relationship="暧昧",
+        personal_type="温暖陪伴",
+        gender="男",
+    )
+    explicit_messages = service.load_few_shot_examples(
+        str(archived_path),
+        relationship="暧昧",
+        personal_type="温暖陪伴",
+        gender="男",
+    )
+
+    assert resolved == active_path
+    assert "归档" not in display_path
+    assert auto_messages[0]["content"] == "*active user*"
+    assert explicit_messages[0]["content"] == "*archived user*"
 
 
 def test_prepare_runtime_bundle_routes_few_shot_with_scene_preference(prompt_sources):

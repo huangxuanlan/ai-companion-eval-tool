@@ -147,6 +147,7 @@
                   <option value="low">低</option>
                   <option value="medium">中</option>
                   <option value="high" selected>高</option>
+                  <option value="max">Max</option>
                 </select>
               </label>
               <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
@@ -189,6 +190,7 @@
             <option value="low">低</option>
             <option value="medium">中</option>
             <option value="high" selected>高</option>
+            <option value="max">Max</option>
           </select>
         </div>
       </div>
@@ -969,10 +971,21 @@
               对比模型与执行策略
             </div>
             <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                 <label class="form-label" style="margin:0;">选择对比模型（可多选）</label>
-                <button type="button" id="btn-toggle-all-compare" class="btn btn-secondary"
-                  style="padding:4px 10px;font-size:12px;min-height:auto" onclick="toggleSelectAllCompareModels()">全选</button>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-secondary"
+                    style="padding:4px 10px;font-size:12px;min-height:auto"
+                    onclick="applyCompareThinkingToSelected('disabled')">思考全关</button>
+                  <button type="button" class="btn btn-secondary"
+                    style="padding:4px 10px;font-size:12px;min-height:auto"
+                    onclick="applyCompareThinkingToSelected('high')">思考高</button>
+                  <button type="button" class="btn btn-secondary"
+                    style="padding:4px 10px;font-size:12px;min-height:auto"
+                    onclick="applyCompareThinkingToSelected('max')">思考Max</button>
+                  <button type="button" id="btn-toggle-all-compare" class="btn btn-secondary"
+                    style="padding:4px 10px;font-size:12px;min-height:auto" onclick="toggleSelectAllCompareModels()">全选</button>
+                </div>
               </div>
               <div id="compare-model-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
             </div>
@@ -1622,6 +1635,7 @@
                   <option value="low">低</option>
                   <option value="medium">中</option>
                   <option value="high" selected>高</option>
+                  <option value="max">Max</option>
                 </select>
               </div>
               <div id="f-thinking-support-hint" style="margin-top:6px;font-size:12px;color:var(--text-tertiary)">默认深度：high</div>
@@ -1956,7 +1970,7 @@
       <div id="history-summary-task-fill" class="batch-rescore-float-fill" style="width:0%"></div>
     </div>
   </div>
-  <script src="js/legacy_bundle.js?v=94" defer></script>
+  <script src="js/legacy_bundle.js?v=96" defer></script>
 </body>
 
 </html>

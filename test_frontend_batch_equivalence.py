@@ -251,6 +251,26 @@ def test_interactive_payload_builder_delegates_to_batch_builder():
     assert "const payload = buildConversationRunPayload();" in body
 
 
+def test_batch_payload_builder_reads_nested_memory_variables():
+    js_path = SERVER_DIR / "static" / "js" / "legacy_bundle.js"
+    source = js_path.read_text(encoding="utf-8")
+
+    modules_start = source.index("function buildSystemModulesPayload")
+    modules_end = source.index("function getMergedCustomVariables", modules_start)
+    modules_body = source[modules_start:modules_end]
+    assert "source.modules?.[key]" in modules_body
+    assert "source.custom_variables?.[key]" in modules_body
+    assert "source.prompt_base_values?.[key]" in modules_body
+
+    payload_start = source.index("function buildConversationRunPayload")
+    payload_end = source.index("function buildConfigSnapshotRequest", payload_start)
+    payload_body = source[payload_start:payload_end]
+    assert "source.custom_variables?.[key]" in payload_body
+    assert "source.prompt_base_values?.[key]" in payload_body
+    assert "source.modules?.[key]" in payload_body
+    assert "const formCustomVariables = cfg ? {} : getMergedCustomVariables();" in payload_body
+
+
 def test_interactive_session_auto_rotates_when_prompt_config_changes():
     js_path = SERVER_DIR / "static" / "js" / "legacy_bundle.js"
     source = js_path.read_text(encoding="utf-8")
@@ -277,6 +297,41 @@ def test_scoring_defaults_controls_expose_save_feedback():
     assert 'id="tc-scoring-reset-defaults"' in html_source
     assert 'id="tc-scoring-default-status"' in html_source
     assert 'id="tc-scoring-concurrency-display"' in html_source and ">24<" in html_source
+
+
+def test_compare_models_expose_per_model_thinking_controls():
+    js_path = SERVER_DIR / "static" / "js" / "legacy_bundle.js"
+    html_path = SERVER_DIR / "static" / "index.html"
+    js_source = js_path.read_text(encoding="utf-8")
+    html_source = html_path.read_text(encoding="utf-8")
+
+    assert "let compareThinkingByModel = {};" in js_source
+    assert "function getCompareThinkingState" in js_source
+    assert "function applyCompareThinkingToSelected" in js_source
+    assert "compare-thinking-select" in js_source
+    assert "getCompareThinkingState(model.id)" in js_source
+    assert "payload.thinking_enabled = thinking.enabled;" in js_source
+    assert "payload.thinking_effort = thinking.thinking_effort;" in js_source
+    assert "模型思考:" in js_source
+    assert "思考全关" in html_source
+    assert "思考高" in html_source
+    assert "思考Max" in html_source
+    assert "legacy_bundle.js?v=96" in html_source
+
+
+def test_prompt_ab_batch_caps_auto_scoring_concurrency():
+    js_path = SERVER_DIR / "static" / "js" / "legacy_bundle.js"
+    source = js_path.read_text(encoding="utf-8")
+
+    assert "const DEFAULT_AB_BATCH_SCORING_CONCURRENCY = 2;" in source
+    marker = "function buildABBatchBranchItem"
+    start = source.index(marker)
+    end = source.index("function buildABBatchOrchestrationPayload", start)
+    body = source[start:end]
+
+    assert "payload.auto_scoring = !dryRun;" in body
+    assert "payload.scoring_max_workers = Math.min(" in body
+    assert "DEFAULT_AB_BATCH_SCORING_CONCURRENCY" in body
 
 
 def test_interactive_and_batch_match_for_ten_turns(tmp_path: Path):

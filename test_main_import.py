@@ -24,15 +24,15 @@ def test_main_can_import_as_package_without_server_dir_on_sys_path():
         if name in sys.modules:
             removed_modules[name] = sys.modules.pop(name)
 
-    if str(SERVER_DIR) in sys.path:
-        sys.path.remove(str(SERVER_DIR))
+    server_dir = str(SERVER_DIR)
+    sys.path[:] = [item for item in sys.path if item != server_dir]
     if str(PROJECT_DIR) not in sys.path:
         sys.path.insert(0, str(PROJECT_DIR))
 
     try:
         main_module = importlib.import_module("server.main")
         assert main_module.app.title == "长文模式多轮对话验证工具"
-        assert str(SERVER_DIR) not in sys.path
+        assert server_dir not in sys.path
     finally:
         sys.modules.pop("server.main", None)
         for name, module in removed_modules.items():

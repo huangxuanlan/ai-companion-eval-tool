@@ -14,6 +14,7 @@ const DEFAULT_LOW_SCORE_THRESHOLD = 6.0;
 const MAX_BATCH_CONCURRENCY = 24;
 const AB_BATCH_BRANCHES_PER_ROLE = 2;
 const DEFAULT_AB_BATCH_ROLE_CONCURRENCY = 1;
+const DEFAULT_AB_BATCH_SCORING_CONCURRENCY = 2;
 const MAX_AB_BATCH_ROLE_CONCURRENCY = Math.max(1, Math.floor(MAX_BATCH_CONCURRENCY / AB_BATCH_BRANCHES_PER_ROLE));
 const TEST_CENTER_NAV_STORAGE_KEY = 'longformTestCenterNavState';
 const DEFAULT_VOICE_FORBIDDEN = '当前为文字聊天场景，禁止输出任何语音条、语音时长、语音播报提示或"发语音给你"这类表述；只能用文字叙事和对白完成互动。';
@@ -23,7 +24,7 @@ const DEFAULT_SCORING_THINKING_ENABLED = true;
 const DEFAULT_SCORING_THINKING_EFFORT = 'high';
 const GEMMA_DEFAULT_THINKING_EFFORT = 'high';
 const GEMMA_THINKING_DEFAULT_MODEL_IDS = new Set(['gemma4-31b', 'gemma4-31b-local']);
-const THINKING_EFFORT_OPTIONS = new Set(['disabled', 'low', 'medium', 'high']);
+const THINKING_EFFORT_OPTIONS = new Set(['disabled', 'low', 'medium', 'high', 'max']);
 const SCORING_DEFAULTS_STORAGE_KEY = 'longformScoringDefaults';
 const MODEL_ID_ALIAS_MAP = Object.freeze({
   'doubao-seed-2-0-lite-260215': 'doubao-lite',
@@ -399,8 +400,16 @@ function buildSystemModulesPayload(source = null) {
   const pick = (keys, fallbackId = '') => {
     if (source) {
       for (const key of keys) {
-        const value = normalizeImportedCellValue(source[key]);
-        if (value) return value;
+        const candidates = [
+          source[key],
+          source.modules?.[key],
+          source.custom_variables?.[key],
+          source.prompt_base_values?.[key],
+        ];
+        for (const candidate of candidates) {
+          const value = normalizeImportedCellValue(candidate);
+          if (value) return value;
+        }
       }
       return '';
     }
@@ -509,6 +518,7 @@ let _chatPromptOptions = [];
 let _activeChatPromptFilename = '';
 let _runtimePromptListings = { summary: null, scoring: null, profile: null };
 let _promptManagerKind = 'chat';
+let compareThinkingByModel = {};
 let _runtimePromptContentCache = new Map();
 const AUTO_GENERATED_PROMPT_VARS = new Set(['currentTime', 'weekDay', '完整时间信息']);
 const RUNTIME_PROMPT_EXTRA_KEYS = ['moments', 'monthly_schedule', 'last_cst_type', '完整时间信息'];
@@ -675,6 +685,69 @@ function getScoringThinkingState(modelId = getInputValue('f-scoring-model').trim
   return resolveThinkingPayload(modelId, enabled, effort);
 }
 
+function getCompareThinkingState(modelId = '') {
+  const normalizedModelId = String(modelId || '').trim();
+  const override = compareThinkingByModel[normalizedModelId];
+  if (override?.touched) {
+    return resolveThinkingPayload(normalizedModelId, !!override.enabled, override.effort || DEFAULT_THINKING_EFFORT);
+  }
+  const base = getDialogueThinkingState(normalizedModelId || getPrimaryModelId());
+  return resolveThinkingPayload(normalizedModelId, base.enabled, base.effort || base.thinking_effort);
+}
+
+function formatCompareThinkingLabel(modelId = '') {
+  const payload = getCompareThinkingState(modelId);
+  if (!payload.supported) return '不支持';
+  if (!payload.enabled) return '思考关';
+  return payload.thinking_effort === 'max' ? '思考Max' : `思考${payload.thinking_effort}`;
+}
+
+function setCompareThinkingOverride(modelId = '', effort = 'disabled') {
+  const normalizedModelId = String(modelId || '').trim();
+  if (!normalizedModelId) return;
+  const normalizedEffort = normalizeThinkingEffortOption(effort, getDefaultThinkingEffortForModel(normalizedModelId));
+  const payload = resolveThinkingPayload(
+    normalizedModelId,
+    normalizedEffort !== 'disabled',
+    normalizedEffort,
+  );
+  compareThinkingByModel[normalizedModelId] = {
+    enabled: payload.enabled,
+    effort: normalizedEffort,
+    touched: true,
+  };
+}
+
+function updateCompareThinkingSelect(modelId = '') {
+  const normalizedModelId = String(modelId || '').trim();
+  const select = [...document.querySelectorAll('select.compare-thinking-select')]
+    .find(item => item.dataset.modelId === normalizedModelId);
+  if (!select) return;
+  const payload = getCompareThinkingState(normalizedModelId);
+  select.disabled = !payload.supported;
+  select.title = payload.supported ? '设置该模型的思考模式' : '该模型不支持思考模式';
+  select.value = payload.supported && payload.enabled ? payload.thinking_effort : 'disabled';
+}
+
+function refreshCompareThinkingControls() {
+  document.querySelectorAll('select.compare-thinking-select').forEach(select => {
+    updateCompareThinkingSelect(select.dataset.modelId || '');
+  });
+  refreshTestCenterShell();
+}
+
+function applyCompareThinkingToSelected(effort = 'disabled') {
+  const checked = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])];
+  if (!checked.length) {
+    showToast('请先选择要设置的模型', 'warning');
+    return;
+  }
+  checked.forEach(input => {
+    if (modelSupportsThinking(input.value)) setCompareThinkingOverride(input.value, effort);
+  });
+  refreshCompareThinkingControls();
+}
+
 function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '', force = false } = {}) {
   const resolvedModelId = modelId || getPrimaryModelId();
   const fallbackEffort = getDefaultThinkingEffortForModel(resolvedModelId);
@@ -696,9 +769,9 @@ function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '
     : !!enabled;
   const requestedEffort = normalizeThinkingEffortOption(
     effort
-      || (mainEffort && mainEffort.value)
-      || _dialogueThinkingEffortDraft
-      || fallbackEffort,
+    || (mainEffort && mainEffort.value)
+    || _dialogueThinkingEffortDraft
+    || fallbackEffort,
     fallbackEffort,
   );
   _dialogueThinkingEffortDraft = requestedEffort === 'disabled' ? fallbackEffort : requestedEffort;
@@ -2025,6 +2098,13 @@ function getCompareModelSummaryText() {
   return selected.length ? `对比模型: ${selected.join(', ')}` : '';
 }
 
+function getCompareThinkingSummaryText() {
+  const selected = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])]
+    .map(input => `${input.dataset.name || input.value}: ${formatCompareThinkingLabel(input.value)}`)
+    .filter(Boolean);
+  return selected.length ? `模型思考: ${selected.join(' / ')}` : '';
+}
+
 function refreshTestCenterShell() {
   const mode = state.testMode || 'batch';
   const meta = getTestCenterModeMeta(mode);
@@ -2054,8 +2134,10 @@ function refreshTestCenterShell() {
   if (chipsWrap) {
     const cfg = typeof getFormConfig === 'function' ? getFormConfig() : {};
     const compareModelSummary = mode === 'compare' ? getCompareModelSummaryText() : '';
+    const compareThinkingSummary = mode === 'compare' ? getCompareThinkingSummaryText() : '';
     const chips = [
       compareModelSummary || (cfg.model_pro ? `主模型: ${cfg.model_pro}` : ''),
+      compareThinkingSummary,
       cfg.model_mini ? `摘要模型: ${cfg.model_mini}` : '',
       cfg.scoring_model_id ? `打分模型: ${cfg.scoring_model_id}` : '',
       cfg.prompt_version ? `主提示词: ${cfg.prompt_version}` : '',
@@ -2215,12 +2297,29 @@ function buildConversationRunPayload(cfg = null, {
   const lastConversationType = resolvePreviousConversationType(String(source.nickname || '').trim());
   const extraCustomVars = {};
   for (const key of ['moments', 'monthly_schedule', '完整时间信息']) {
-    const value = source[key];
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      extraCustomVars[key] = String(value).trim();
+    const candidates = [
+      source[key],
+      source.custom_variables?.[key],
+      source.prompt_base_values?.[key],
+      source.modules?.[key],
+    ];
+    for (const candidate of candidates) {
+      const value = normalizeImportedCellValue(candidate);
+      if (value) {
+        extraCustomVars[key] = value;
+        break;
+      }
     }
   }
-  const customVariables = { ...getMergedCustomVariables(), ...extraCustomVars };
+  const sourceCustomVariables = source && typeof source.custom_variables === 'object' ? source.custom_variables : {};
+  const sourcePromptBaseValues = source && typeof source.prompt_base_values === 'object' ? source.prompt_base_values : {};
+  const formCustomVariables = cfg ? {} : getMergedCustomVariables();
+  const customVariables = {
+    ...sourcePromptBaseValues,
+    ...sourceCustomVariables,
+    ...formCustomVariables,
+    ...extraCustomVars,
+  };
   const sampling = getGenerationSamplingConfig(source);
   const runtimeCompleteTimeInfo = String(source['完整时间信息'] || '').trim();
   const runtimeCurrentTime = String(source.currentTime || '').trim();
@@ -3711,7 +3810,7 @@ function renderTurnBubbles(turn, turnIdx) {
     // AI评分 Popover 点击事件
     const aiScoreTrigger = ab.querySelector('.ai-score-trigger');
     const aiDetailBtn = ab.querySelector('.ai-score-detail-btn');
-    
+
     const triggerRescore = () => runInlineAiScore({
       turnNumber,
       userInput,
@@ -4034,11 +4133,13 @@ function formatNarration(text) {
   const normalizeDialogueLine = line => {
     const trimmed = String(line || '').trim();
     if (!trimmed) return line;
+    // v4.9: 对白为纯文本, 旧格式 **"..."** 剥离标记
     const match = trimmed.match(/^(?:\*\*)?(?:[""「])(?:\*\*)?(.+?)(?:\*\*)?(?:[""」])(?:\*\*)?$/);
     if (!match) return line;
     const body = normalizeDialogueText(match[1]);
     if (!body) return line;
-    return line.replace(trimmed, `**"${body}"**`);
+    // v4.9: 保持纯文本对白（不再回包 **""**）
+    return line.replace(trimmed, body);
   };
   const stripPseudoXmlLinePrefix = line => {
     const match = String(line || '').match(
@@ -4046,21 +4147,15 @@ function formatNarration(text) {
     );
     if (!match) return line;
     const lead = match[1] || '';
-    const tag = String(match[2] || '').toLowerCase();
     let body = String(match[3] || '').replace(/^\s+/, '');
-    if (tag === 'dialogue' && body && !/^(?:["\u201C\uFF02「])/.test(body)) {
-      body = `"${body}`;
-    }
     return `${lead}${body}`;
   };
-  // 预处理：保留 v2.6 的对白格式，旧版旁白/对白仅做兼容，不再回退到旧中间态
-  // 额外兜底：旧会话可能已存入 `"dialogue">"..."` 这类模型幻觉前缀，前端渲染时剥离。
+  // 预处理：兼容旧格式 + v4.9 新格式
   const pre = String(text)
-    .replace(/<span\s+class=["']dialogue["'][^>]*>([\s\S]*?)<\/span>/gi, (_, content) => `**"${normalizeDialogueText(content)}"**`)
-    .replace(/<dialogue>([\s\S]*?)<\/dialogue>/gi, (_, content) => `**"${normalizeDialogueText(content)}"**`)
-    .replace(/<span\s+class=["']narration["'][^>]*>([\s\S]*?)<\/span>/gi, '$1')
+    .replace(/<span\s+class=['"]dialogue['"][^>]*>([\s\S]*?)<\/span>/gi, (_, content) => normalizeDialogueText(content))
+    .replace(/<dialogue>([\s\S]*?)<\/dialogue>/gi, (_, content) => normalizeDialogueText(content))
+    .replace(/<span\s+class=['"]narration['"][^>]*>([\s\S]*?)<\/span>/gi, '$1')
     .replace(/<narration>([\s\S]*?)<\/narration>/gi, '$1')
-    // 剥离残留的 <dialogue>/<narration> 开合标签（含属性形态）
     .replace(/<\s*\/?\s*(?:dialogue|narration)[^>]*>/gi, '');
   const normalized = pre
     .split('\n')
@@ -4068,9 +4163,14 @@ function formatNarration(text) {
     .map(normalizeDialogueLine)
     .join('\n');
   return escapeHtml(normalized)
-    .replace(/\*\*"([^"\n]+?)"\*\*/g, '<strong class="dialogue">"$1"</strong>')
+    // v4.9: （旁白内容） → 斜体灰色渲染
+    .replace(/\uff08([^\uff09\n]{2,})\uff09/g, '<span class="narration">$1</span>')
+    // 兼容旧数据: **"对白"** → 加粗渲染
+    .replace(/\*\*&quot;([^&]+?)&quot;\*\*/g, '<strong class="dialogue">"$1"</strong>')
     .replace(/「([^」]+)」/g, '<strong class="dialogue">「$1」</strong>')
-    .replace(/(^|[^<>=\w])"([^"\n]+)"/g, '$1<strong class="dialogue">"$2"</strong>')
+    // 兼容旧数据: 普通引号对白
+    .replace(/(^|[^<>=\w])&quot;([^&\n]+)&quot;/g, '$1<strong class="dialogue">"$2"</strong>')
+    // 兼容旧数据: *斜体旁白*
     .replace(/(^|[^\*])\*([^*\n]+)\*(?!\*)/g, '$1<span class="narration">$2</span>')
     .replace(/\n/g, '<br>');
 }
@@ -6181,8 +6281,8 @@ async function triggerScoring({ forceFullRescore = false } = {}) {
       const ensuredSummary = ensured?.summary || {};
       updateScoringProgress(
         Number(ensuredSummary.scored_count || 0)
-          + Number(ensuredSummary.failed_count || 0)
-          + Number(ensuredSummary.skipped_count || 0),
+        + Number(ensuredSummary.failed_count || 0)
+        + Number(ensuredSummary.skipped_count || 0),
         Number(ensuredSummary.total_count || 0) || progressTotalTurns,
         Number(ensuredSummary.failed_count || 0),
       );
@@ -6220,8 +6320,8 @@ async function triggerScoring({ forceFullRescore = false } = {}) {
           const delayedSummary = result.summary || {};
           updateScoringProgress(
             Number(delayedSummary.scored_count || 0)
-              + Number(delayedSummary.failed_count || 0)
-              + Number(delayedSummary.skipped_count || 0),
+            + Number(delayedSummary.failed_count || 0)
+            + Number(delayedSummary.skipped_count || 0),
             Number(delayedSummary.total_count || 0) || progressTotalTurns,
             Number(delayedSummary.failed_count || 0),
           );
@@ -6284,8 +6384,8 @@ async function triggerScoring({ forceFullRescore = false } = {}) {
       const summary = msg.summary || {};
       updateScoringProgress(
         Number(summary.scored_count || 0)
-          + Number(summary.failed_count || 0)
-          + Number(summary.skipped_count || 0),
+        + Number(summary.failed_count || 0)
+        + Number(summary.skipped_count || 0),
         Number(summary.total_count || 0) || progressTotalTurns,
       );
       finalizeScoring(null, 'completed');
@@ -8598,9 +8698,9 @@ async function triggerConversationScoringFromBatch(convId, btnEl) {
         if (msg.type === 'completed') {
           lastSummary = msg.summary || null;
         }
-      } catch (_) {}
+      } catch (_) { }
     };
-  } catch (_) {}
+  } catch (_) { }
 
   try {
     const scoreData = await ensureConversationScored(id);
@@ -8636,7 +8736,7 @@ async function triggerConversationScoringFromBatch(convId, btnEl) {
     }
     showToast('补评分失败: ' + msg, 'error');
   } finally {
-    if (ws && ws.readyState <= 1) try { ws.close(); } catch (_) {}
+    if (ws && ws.readyState <= 1) try { ws.close(); } catch (_) { }
   }
 }
 
@@ -9523,7 +9623,7 @@ async function exportBatchResults() {
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objectUrl;
-    a.download = `batch_results_${new Date().toISOString().slice(0,10).replace(/-/g,'')}.xlsx`;
+    a.download = `batch_results_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`;
     a.click();
     URL.revokeObjectURL(objectUrl);
     showToast(`导出成功: ${convIds.length} 个会话`, 'success');
@@ -10035,6 +10135,9 @@ function buildCompareOrchestrationPayload(configs, models, { dryRun } = {}) {
             turns,
             dryRun: !!dryRun,
           });
+          const thinking = getCompareThinkingState(model.id);
+          payload.thinking_enabled = thinking.enabled;
+          payload.thinking_effort = thinking.thinking_effort;
           payload.auto_scoring = autoScoringEnabled;
           return {
             key: `${groupKey}:${model.id || modelIndex + 1}`,
@@ -10137,11 +10240,32 @@ async function initComparePage() {
   try {
     const r = await fetch('/api/models?tier=pro'); const data = await r.json();
     (data.models || data || []).forEach(m => {
+      const modelId = m.id || m;
+      const modelName = m.name || modelId;
+      if (m.capabilities) _modelCapabilities[modelId] = m.capabilities;
       const label = document.createElement('label');
-      label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg-hover);border-radius:6px;font-size:13px;cursor:pointer';
-      label.innerHTML = `<input type="checkbox" value="${escapeHtml(m.id || m)}" data-name="${escapeHtml(m.name || m.id || m)}" data-provider="${escapeHtml(m.provider || '')}"> ${escapeHtml(m.name || m.id || m)}`;
-      label.querySelector('input')?.addEventListener('change', () => { refreshTestCenterShell(); checkProviderConflicts(); syncToggleAllBtnText(); });
+      label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-hover);border-radius:6px;font-size:13px;cursor:pointer;min-height:36px';
+      label.innerHTML = `
+        <input type="checkbox" value="${escapeHtml(modelId)}" data-name="${escapeHtml(modelName)}" data-provider="${escapeHtml(m.provider || '')}">
+        <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(modelName)}</span>
+        <select class="compare-thinking-select" data-model-id="${escapeHtml(modelId)}" title="设置该模型的思考模式"
+          style="font-size:12px;border:1px solid var(--border-light);background:var(--bg-surface);color:var(--text-secondary);border-radius:4px;padding:3px 6px;min-height:26px;cursor:pointer">
+          <option value="disabled">思考关</option>
+          <option value="high">思考高</option>
+          <option value="max">思考Max</option>
+        </select>`;
+      const input = label.querySelector('input');
+      const thinkingSelect = label.querySelector('select.compare-thinking-select');
+      input?.addEventListener('change', () => { refreshTestCenterShell(); checkProviderConflicts(); syncToggleAllBtnText(); });
+      thinkingSelect?.addEventListener('click', event => event.stopPropagation());
+      thinkingSelect?.addEventListener('change', event => {
+        event.stopPropagation();
+        setCompareThinkingOverride(modelId, thinkingSelect.value);
+        updateCompareThinkingSelect(modelId);
+        refreshTestCenterShell();
+      });
       box.appendChild(label);
+      updateCompareThinkingSelect(modelId);
     });
     syncToggleAllBtnText();
   } catch (e) { console.warn('\u6a21\u578b\u5217\u8868\u52a0\u8f7d\u5931\u8d25:', e); }
@@ -10253,6 +10377,10 @@ function buildABBatchBranchItem(cfg, {
   });
   payload.prompt_version = String(promptVersion || payload.prompt_version || '').trim();
   payload.auto_scoring = !dryRun;
+  payload.scoring_max_workers = Math.min(
+    normalizeScoringConcurrency(payload.scoring_max_workers),
+    DEFAULT_AB_BATCH_SCORING_CONCURRENCY,
+  );
   return {
     key: `${groupKey}:${variant}`,
     label,
@@ -11243,7 +11371,7 @@ function renderCompareCards(results) {
       : (normalizedStatus === 'failed' || normalizedStatus === 'timeout' || normalizedStatus === 'cancelled'
         ? 'var(--danger-color)'
         : 'var(--warning-color)');
-  const avgScore = Number.parseFloat(r.avgScore);
+    const avgScore = Number.parseFloat(r.avgScore);
     card.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:12px;color:${colors[i % colors.length]}">🤖 ${escapeHtml(r.model.name)}</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.turnCount}</div><div style="font-size:11px;color:var(--text-tertiary)">完成轮次</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.avgChars}</div><div style="font-size:11px;color:var(--text-tertiary)">平均字数</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${Number.isFinite(avgScore) ? getScoreColor(avgScore) : 'var(--text-tertiary)'}">${Number.isFinite(avgScore) ? avgScore.toFixed(1) : '--'}</div><div style="font-size:11px;color:var(--text-tertiary)">AI均分</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${statusColor}">${statusLabel}</div><div style="font-size:11px;color:var(--text-tertiary)">状态</div></div></div>${r.error ? `<div style="margin-top:12px;font-size:12px;line-height:1.6;color:var(--danger-color)">${escapeHtml(r.error)}</div>` : ''}${r.convId ? `<button class="btn btn-secondary" style="width:100%;margin-top:12px;justify-content:center" onclick="viewConversation('${r.convId}')">📖 查看对话详情</button>` : ''}`;
     cards.appendChild(card);
   });
@@ -12675,11 +12803,11 @@ async function fetchPromptVersions() {
       _chatPromptOptions = (chatData.prompts || []).filter(p => p.is_main_prompt);
       _activeChatPromptFilename = chatData.active_filename || '';
       _chatPromptOptions.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.filename;
-          opt.textContent = p.is_latest ? `${p.filename}（最新）` : p.filename;
-          promptSel.appendChild(opt);
-        });
+        const opt = document.createElement('option');
+        opt.value = p.filename;
+        opt.textContent = p.is_latest ? `${p.filename}（最新）` : p.filename;
+        promptSel.appendChild(opt);
+      });
       const latestFilename = _chatPromptOptions.find(p => p.is_latest)?.filename || '';
       promptSel.value = currentValue || latestFilename || '';
       await syncSelectedChatPrompt({ refreshPreview: true });

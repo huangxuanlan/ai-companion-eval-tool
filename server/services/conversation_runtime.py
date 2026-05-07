@@ -31,12 +31,12 @@ def _safe_update_turn_dialogue_summary(
 
 
 def refresh_runtime_bundle_memory(service, runtime_bundle, config: dict) -> None:
-    modules = dict(config.get("modules", {}) or {})
-    runtime_bundle.memory_profile = str(modules.get("dialogueStartPrompt", "")).strip()
-    runtime_bundle.memory_moments = str(modules.get("moments", "")).strip()
+    variables = service.prompt.build_variables(config)
     runtime_bundle.seed_dialogue_summary = str(
-        modules.get("dialogue_summary", "") or config.get("dialogue_summary", "")
+        variables.get("dialogue_summary", "") or config.get("dialogue_summary", "")
     ).strip()
+    runtime_bundle.memory_profile = str(variables.get("dialogueStartPrompt", "")).strip()
+    runtime_bundle.memory_moments = str(variables.get("moments", "")).strip()
 
 
 def persist_runtime_state(service, conv_id: str, config: dict) -> None:

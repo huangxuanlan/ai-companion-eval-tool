@@ -40,6 +40,7 @@ class LiveScoringDispatcher:
         self._queued_turns: set[tuple[str, int]] = set()
         self._running_turns: set[tuple[str, int]] = set()
         self._active_conversations: set[str] = set()
+        self._active_limit_groups: dict[str, int] = {}
         self._active_tasks: set[asyncio.Task] = set()
         self._idle_event = asyncio.Event()
         self._idle_event.set()
@@ -180,6 +181,38 @@ class LiveScoringDispatcher:
         async with self._lock:
             self._schedule_locked()
 
+    @staticmethod
+    def _coerce_worker_limit(value) -> int | None:
+        if value is None:
+            return None
+        try:
+            return max(1, min(int(value), 24))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _job_limit_group(job: LiveScoringJob) -> str:
+        runtime = dict((job.config or {}).get("runtime", {}) or {})
+        for key in ("ab_session_id", "orchestration_run_id", "batch_run_id"):
+            value = str(runtime.get(key, "") or "").strip()
+            if value:
+                return f"{key}:{value}"
+        return ""
+
+    @classmethod
+    def _job_worker_limit(cls, job: LiveScoringJob) -> int | None:
+        runtime = dict((job.config or {}).get("runtime", {}) or {})
+        return cls._coerce_worker_limit(runtime.get("scoring_max_workers"))
+
+    def _group_has_capacity(self, job: LiveScoringJob) -> bool:
+        group = self._job_limit_group(job)
+        if not group:
+            return True
+        limit = self._job_worker_limit(job)
+        if limit is None:
+            return True
+        return self._active_limit_groups.get(group, 0) < limit
+
     async def wait_for_idle(self, timeout: float = 10.0) -> bool:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + max(timeout, 0.1)
@@ -212,6 +245,11 @@ class LiveScoringDispatcher:
             self._queued_turns.discard(key)
             self._running_turns.add(key)
             self._active_conversations.add(conv_id)
+            limit_group = self._job_limit_group(job)
+            if limit_group:
+                self._active_limit_groups[limit_group] = (
+                    self._active_limit_groups.get(limit_group, 0) + 1
+                )
             task = asyncio.create_task(self._run_job(job))
             self._active_tasks.add(task)
             task.add_done_callback(lambda done, bound_job=job: asyncio.create_task(self._on_job_done(bound_job, done)))
@@ -236,6 +274,9 @@ class LiveScoringDispatcher:
                 self._queues.pop(conv_id, None)
                 continue
             if ctrl and bool(getattr(ctrl, "is_paused", False)):
+                self._queue_order.append(conv_id)
+                continue
+            if queue and not self._group_has_capacity(queue[0]):
                 self._queue_order.append(conv_id)
                 continue
             if queue:
@@ -283,6 +324,13 @@ class LiveScoringDispatcher:
             key = (job.conversation_id, job.turn)
             self._running_turns.discard(key)
             self._active_conversations.discard(job.conversation_id)
+            limit_group = self._job_limit_group(job)
+            if limit_group:
+                next_count = self._active_limit_groups.get(limit_group, 0) - 1
+                if next_count > 0:
+                    self._active_limit_groups[limit_group] = next_count
+                else:
+                    self._active_limit_groups.pop(limit_group, None)
             self._active_tasks.discard(task)
             queue = self._queues.get(job.conversation_id)
             if queue and job.conversation_id not in self._queue_order:

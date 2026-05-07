@@ -168,12 +168,12 @@ class TestE1MessagePipelineIntegrity:
         assert inject_msgs, "应有 Depth Injection 消息"
         assert "<system_reminder>" not in inject_msgs[0]["content"]
 
-    def test_first_turn_skips_fewshot_for_both_models(self):
-        """E1e: 首轮跳过 few-shot，两种模型表现一致。"""
+    def test_first_turn_injects_fewshot_for_both_models(self):
+        """E1e: 首轮注入 few-shot，两种模型表现一致。"""
         for model_id in ("gemma4-31b", "doubao-pro-32k"):
             messages = _build_test_messages(model_id, turn_num=1, history=[])
             contents = " ".join(m["content"] for m in messages)
-            assert "示例输入" not in contents, f"{model_id}: 首轮不应注入 few-shot"
+            assert "示例输入" in contents, f"{model_id}: 首轮应注入 few-shot"
             assert FIRST_TURN_SENTINEL in contents, f"{model_id}: 首轮应有哨兵"
 
     def test_message_order_invariant(self):

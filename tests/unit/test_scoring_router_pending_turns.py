@@ -19,6 +19,49 @@ def test_select_pending_scoring_results_only_keeps_unscored_and_failed():
     assert [item["turn"] for item in pending] == [2, 3]
 
 
+def test_live_scoring_default_global_capacity_is_capped(monkeypatch):
+    monkeypatch.delenv(scoring_router_module.LIVE_SCORING_MAX_WORKERS_ENV, raising=False)
+
+    assert scoring_router_module._resolve_live_scoring_max_workers() == 6
+
+
+def test_enqueue_live_score_turn_does_not_mutate_global_worker_limit(monkeypatch):
+    calls: list[int] = []
+
+    class _FakeService:
+        def set_max_workers(self, value):
+            calls.append(value)
+
+    class _FakeDispatcher:
+        async def notify_capacity_changed(self):
+            calls.append(-1)
+
+        async def enqueue(self, conv_id, turn, config=None):
+            assert conv_id == "conv-live"
+            assert turn == 2
+            return True
+
+    monkeypatch.setattr(scoring_router_module, "_get_scoring", lambda: _FakeService())
+    monkeypatch.setattr(scoring_router_module, "get_live_scoring_dispatcher", lambda: _FakeDispatcher())
+    monkeypatch.setattr(scoring_router_module, "_record_scoring_event", lambda *_args, **_kwargs: None)
+
+    async def _fake_push_live_score_event(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(scoring_router_module, "_push_live_score_event", _fake_push_live_score_event)
+
+    result = asyncio.run(
+        scoring_router_module.enqueue_live_score_turn(
+            "conv-live",
+            2,
+            config={"runtime": {"scoring_max_workers": 2}},
+        )
+    )
+
+    assert result is True
+    assert calls == []
+
+
 def test_trigger_scoring_returns_already_scored_when_no_pending_results(monkeypatch):
     conversation = {
         "id": "conv-scored",

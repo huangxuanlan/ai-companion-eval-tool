@@ -69,7 +69,7 @@ STYLE_ISOLATION_MSG = (
 )
 
 LONGFORM_WORD_RANGE = "300-500字"
-LONGFORM_OUTPUT_FORMAT = '旁白为纯文本不加包裹符号，对白用 **""** 包裹'
+LONGFORM_OUTPUT_FORMAT = "旁白用（）包裹，对白为纯文本不带任何标记"
 
 CORE_CONSTRAINTS_TEMPLATE = """<Core_Constraints>
 - 长度：""" + LONGFORM_WORD_RANGE + """完整叙事
@@ -83,7 +83,7 @@ CORE_CONSTRAINTS_TEMPLATE = """<Core_Constraints>
 
 V52_USER_CORE_CONSTRAINTS = (
     "<Core_Constraints>"
-    "长度300-500字；旁白纯文本；对白加粗双引号；结尾保留回话动力；"
+    "长度300-500字；旁白用（）包裹；对白为纯文本不带任何标记；结尾保留回话动力；"
     "只继承真实历史和记忆事实，不模仿摘要/Few-shot/异质记录格式。"
     "</Core_Constraints>"
 )
@@ -168,7 +168,7 @@ def _v52_system_core_for_mode(target_mode: str) -> str:
         )
     return (
         "---Core_Constraints 总则---\n"
-        "长文模式回复长度300-500字；旁白纯文本；对白使用加粗双引号；结尾保留回话动力；"
+        "长文模式回复长度300-500字；旁白用（）包裹；对白为纯文本不带任何标记；结尾保留回话动力；"
         "不得输出系统说明、摘要标题、内部记录标题或“以下为...”类模板语。"
     )
 
@@ -373,12 +373,15 @@ class MessageAssembler:
           [N-1] system  → Core_Constraints 重申
           [N]   user    → 当前用户输入
 
-        首轮分支（conversation_history 为空时）：
-          跳过 Few-shot 层，插入首次对话哨兵。
+        首轮分支（turn_num <= 1 且 conversation_history 为空时）：
+          保留 Few-shot 层，插入首次对话哨兵。
         """
         if _is_truthy_env("LONGFORM_V52_MESSAGE_CONTRACT"):
-            is_first_turn = not conversation_history
-            injected_few_shot: list[dict] = [] if is_first_turn else (few_shot_messages or [])
+            try:
+                effective_turn_num = int(turn_num or 1)
+            except (TypeError, ValueError):
+                effective_turn_num = 1
+            injected_few_shot: list[dict] = few_shot_messages or []
             return self._build_messages_v52(
                 rendered_system=rendered_system,
                 system_after=system_after,
@@ -405,12 +408,10 @@ class MessageAssembler:
             full_system = rendered_system + "\n\n" + system_after
 
         # S1: Few-shot 注入策略
-        # - 2026-04-23 切换场景 A/B 测试：首轮注入 RSO 3/3，跳过 0/3
-        #   根因：生产 dialogueStartPrompt 含"如果下文有你们的对话历史"句，
-        #   导致模型将 Few-shot user/assistant 对误识为历史对话→场景渗透
-        # - 首轮（含纯首轮 + 切换首轮）跳过 Few-shot，第 2 轮起注入
+        # - 首轮也注入 Few-shot，首轮真实性由 FIRST_TURN_SENTINEL 和隔离声明兜住
+        # - 千问仍保持 user/assistant 示例注入，其它模型使用 system 内嵌
         is_first_turn = not conversation_history
-        injected_few_shot: list[dict] = [] if is_first_turn else (few_shot_messages or [])
+        injected_few_shot: list[dict] = few_shot_messages or []
 
         # 两路 Few-shot 注入（千问保持原逻辑 / 其他全部 Plan B system 内嵌）
         self._inject_few_shot(
@@ -425,7 +426,7 @@ class MessageAssembler:
             messages.append({"role": "system", "content": FIRST_TURN_SENTINEL})
 
         # C4: Gemma / 千问 合并 STYLE_ISOLATION + memory_context 为单条 system
-        if conversation_history or effective_memory_context:
+        if conversation_history or effective_memory_context or (is_qwen and injected_few_shot):
             style_content = (
                 f"<context_boundary>\n{STYLE_ISOLATION_MSG}\n</context_boundary>"
                 if is_gemma

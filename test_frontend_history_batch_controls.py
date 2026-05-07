@@ -432,7 +432,7 @@ def test_orchestration_notice_renders_retry_entry_and_cache_busted_bundle():
     assert 'id="orchestration-env-notice"' in html
     assert "onclick=\"retryOrchestrationEnvironmentProbe()\"" in source
     assert "function renderOrchestrationEnvironmentNotice()" in source
-    assert 'legacy_bundle.js?v=94' in html
+    assert 'legacy_bundle.js?v=95' in html
 
 
 def test_prompt_ab_batch_mode_reuses_excel_and_orchestration_controls():

@@ -18,6 +18,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import database as db
@@ -119,6 +120,45 @@ async def invoke_score_turn_compat(
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+def _invoke_score_one_sync_compat(
+    score_one_sync,
+    row: dict,
+    *,
+    timeout_s: float | None = None,
+    retry_delays: tuple[float, ...] | list[float] | None = None,
+    provider_retry_delays: tuple[float, ...] | list[float] | None = None,
+    prompt_version: str | None = None,
+    model_id: str | None = None,
+    thinking_effort: str = "",
+) -> dict:
+    forwarded = {
+        "timeout_s": timeout_s,
+        "retry_delays": retry_delays,
+        "provider_retry_delays": provider_retry_delays,
+        "prompt_version": prompt_version,
+        "model_id": model_id,
+        "thinking_effort": thinking_effort,
+    }
+    try:
+        signature = inspect.signature(score_one_sync)
+        parameters = signature.parameters
+        accepts_var_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in parameters.values()
+        )
+    except (TypeError, ValueError):
+        parameters = {}
+        accepts_var_kwargs = False
+
+    if accepts_var_kwargs:
+        filtered_kwargs = forwarded
+    else:
+        filtered_kwargs = {
+            key: value for key, value in forwarded.items() if key in parameters
+        }
+    return score_one_sync(row, **filtered_kwargs)
 
 
 def _get_score_excel_module():
@@ -612,12 +652,24 @@ class ScoringService:
 
         from openai import OpenAI
 
-        return OpenAI(
-            base_url=self._resolved_scoring_base_url,
-            api_key=chosen_key,
-            timeout=timeout_s or self._default_timeout_s,
-            max_retries=0,
-        )
+        client_kwargs = {
+            "base_url": self._resolved_scoring_base_url,
+            "api_key": chosen_key,
+            "timeout": timeout_s or self._default_timeout_s,
+        }
+        try:
+            signature = inspect.signature(OpenAI)
+            parameters = signature.parameters
+            accepts_var_kwargs = any(
+                param.kind == inspect.Parameter.VAR_KEYWORD
+                for param in parameters.values()
+            )
+        except (TypeError, ValueError):
+            parameters = {}
+            accepts_var_kwargs = True
+        if accepts_var_kwargs or "max_retries" in parameters:
+            client_kwargs["max_retries"] = 0
+        return OpenAI(**client_kwargs)
 
     def _call_scoring_via_openai(
         self,
@@ -693,15 +745,15 @@ class ScoringService:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_content})
-        result = adapter.chat(
-            candidate_alias,
-            messages,
-            max_tokens=self._max_tokens,
-            thinking_effort=thinking_effort or "disabled",
-            temperature=0,
-            top_p=1,
-            provider_retry_delays=provider_retry_delays,
-        )
+        request_kwargs = {
+            "max_tokens": self._max_tokens,
+            "thinking_effort": thinking_effort or "disabled",
+            "temperature": 0,
+            "top_p": 1,
+        }
+        if provider_retry_delays is not None:
+            request_kwargs["provider_retry_delays"] = provider_retry_delays
+        result = adapter.chat(candidate_alias, messages, **request_kwargs)
         if not result.success:
             raise RuntimeError(result.error or f"{candidate_alias} 打分调用失败")
         parsed = self._parse_score_payload(result.content or "")
@@ -1045,16 +1097,20 @@ class ScoringService:
         }
 
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            self._executor,
+        score_call = partial(
+            _invoke_score_one_sync_compat,
             self._score_one_sync,
             row,
-            timeout_s,
-            retry_delays,
-            provider_retry_delays,
-            prompt_version,
-            model_id,
-            thinking_effort,
+            timeout_s=timeout_s,
+            retry_delays=retry_delays,
+            provider_retry_delays=provider_retry_delays,
+            prompt_version=prompt_version,
+            model_id=model_id,
+            thinking_effort=thinking_effort,
+        )
+        return await loop.run_in_executor(
+            self._executor,
+            score_call,
         )
 
     async def score_conversation(
@@ -1245,15 +1301,20 @@ class ScoringService:
         active_prompt = prompt_version or self.prompt_store.get_active_filename()
 
         for idx, row in enumerate(rows, start=1):
-            result = await loop.run_in_executor(
-                self._executor,
+            score_call = partial(
+                _invoke_score_one_sync_compat,
                 self._score_one_sync,
                 row,
-                None,
-                None,
-                active_prompt,
-                model_id,
-                thinking_effort,
+                timeout_s=None,
+                retry_delays=None,
+                provider_retry_delays=None,
+                prompt_version=active_prompt,
+                model_id=model_id,
+                thinking_effort=thinking_effort,
+            )
+            result = await loop.run_in_executor(
+                self._executor,
+                score_call,
             )
             scored_rows.append({**row, **result})
             if on_progress:

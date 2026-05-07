@@ -301,8 +301,8 @@ def test_qwen_merges_separator_style_memory_into_one():
     assert not standalone_sep, "千问模型的 SEPARATOR 不应独立存在"
 
 
-def test_qwen_first_turn_skips_fewshot():
-    """T4c: 千问首轮应跳过 Few-shot，走普通 system（与非千问行为一致）。"""
+def test_qwen_first_turn_injects_fewshot():
+    """T4c: 千问首轮也应注入 Few-shot，并保留首次对话哨兵。"""
     assembler = MessageAssembler()
     few_shot = [
         {"role": "user", "content": "示例用户"},
@@ -323,16 +323,17 @@ def test_qwen_first_turn_skips_fewshot():
         model_id="qwen3.6-plus",
     )
 
-    # 首轮不应包含 Few-shot 内容
+    # 首轮应包含 Few-shot 内容
     all_contents = " ".join(m["content"] for m in messages)
-    assert "示例用户" not in all_contents, "千问首轮不应注入 Few-shot"
-    assert "示例回复" not in all_contents, "千问首轮不应注入 Few-shot"
+    assert "示例用户" in all_contents, "千问首轮应注入 Few-shot user 示例"
+    assert "示例回复" in all_contents, "千问首轮应注入 Few-shot assistant 示例"
     # 应包含首轮哨兵
     assert "第一次对话" in all_contents, "千问首轮应包含首轮哨兵消息"
-    # 主 system 不应包含 FEW_SHOT_PREFIX
-    assert "写作风格示例开始" not in messages[0]["content"], (
-        "千问首轮主 system 不应包含 FEW_SHOT_PREFIX"
+    # 主 system 应包含 FEW_SHOT_PREFIX，后续 system 应闭合示例边界
+    assert "写作风格示例开始" in messages[0]["content"], (
+        "千问首轮主 system 应包含 FEW_SHOT_PREFIX"
     )
+    assert "风格示例结束" in all_contents, "千问首轮应包含 Few-shot 结束分隔"
 
 
 # ─────────────────── T3: 历史 thinking strip ────────────────────
@@ -550,8 +551,8 @@ def test_minimax_uses_plan_b_system_embedding():
             raise AssertionError("Plan B 不应有 role=assistant 的 Few-shot 示例")
 
 
-def test_plan_b_first_turn_injects_few_shot():
-    """T4d: Plan B 模型首轮也注入 Few-shot（system 内嵌），千问首轮仍跳过。"""
+def test_plan_b_and_qwen_first_turn_inject_few_shot():
+    """T4d: Plan B 与千问模型首轮都注入 Few-shot。"""
     assembler = MessageAssembler()
     few_shot = [
         {"role": "user", "content": "示例用户"},
@@ -577,7 +578,7 @@ def test_plan_b_first_turn_injects_few_shot():
     has_fewshot = any("写作风格示例" in c for c in sys_contents)
     assert has_fewshot, "Plan B 首轮应包含 system 内嵌的 Few-shot"
 
-    # 千问首轮：不应有 Few-shot
+    # 千问首轮：应有 Few-shot
     msgs_qwen = assembler.build_messages(
         rendered_system="你是角色",
         system_after="",
@@ -594,5 +595,4 @@ def test_plan_b_first_turn_injects_few_shot():
     )
     sys_qwen = [m["content"] for m in msgs_qwen if m["role"] == "system"]
     has_qwen_fewshot = any("写作风格示例" in c or "风格示例正文" in c for c in sys_qwen)
-    assert not has_qwen_fewshot, "千问首轮应跳过 Few-shot（S1 保留）"
-
+    assert has_qwen_fewshot, "千问首轮也应注入 Few-shot"

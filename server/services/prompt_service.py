@@ -345,6 +345,10 @@ class PromptService:
         gender_tokens = ["男性", "男"] if "男" in gender else ["女性", "女"]
         return any(token in name for token in gender_tokens)
 
+    @staticmethod
+    def _is_archived_few_shot_candidate(candidate: Path) -> bool:
+        return any("归档" in str(part) for part in candidate.parts)
+
     @classmethod
     def _rank_few_shot_candidate(cls, candidate: Path) -> tuple[int, int, int, str]:
         name = candidate.name
@@ -417,6 +421,8 @@ class PromptService:
                 if not base.exists():
                     continue
                 for candidate in base.rglob("*Few-shot*.md"):
+                    if self._is_archived_few_shot_candidate(candidate):
+                        continue
                     key = str(candidate.resolve())
                     if key in seen:
                         continue

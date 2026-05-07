@@ -1627,12 +1627,12 @@ def test_interactive_generate_closes_dangling_dialogue_line(
         )
         assert_true(generate_response.status_code == 200, generate_response.text)
         payload = generate_response.json()
-        expected_tail = '**"周五晚上我约了人试新开的火锅店，你跟我一起去。"**'
+        expected_tail = "周五晚上我约了人试新开的火锅店，你跟我一起去。"
 
         assert_true(expected_tail in payload["ai_output"], "接口返回未自动闭合残缺对白")
         assert_true(
-            payload["ai_output"].count('**"') == payload["ai_output"].count('"**'),
-            "接口返回仍存在未闭合对白标记",
+            '**"' not in payload["ai_output"] and '"**' not in payload["ai_output"],
+            "接口返回仍残留旧版对白标记",
         )
 
         latest = db.get_conversation(conv_id)
@@ -1640,8 +1640,8 @@ def test_interactive_generate_closes_dangling_dialogue_line(
         stored_turn = latest["results"][0]
         assert_true(expected_tail in stored_turn["ai_output"], "落库结果未自动闭合残缺对白")
         assert_true(
-            stored_turn["ai_output"].count('**"') == stored_turn["ai_output"].count('"**'),
-            "数据库中的对白标记仍未闭合",
+            '**"' not in stored_turn["ai_output"] and '"**' not in stored_turn["ai_output"],
+            "数据库中仍残留旧版对白标记",
         )
     finally:
         conversations_router._conv_service = None
@@ -3571,6 +3571,49 @@ def test_live_scoring_dispatcher_respects_global_pool_limit():
 
     asyncio.run(scenario())
     assert_true(state["max_running"] == 2, f"全局并发上限未生效: {state}")
+
+
+def test_live_scoring_dispatcher_respects_runtime_group_limit():
+    from services.live_scoring_dispatcher import LiveScoringDispatcher
+
+    conv_ids = [
+        create_unscored_conversation(
+            f"AB并发会话{idx}",
+            turn_count=1,
+            runtime={
+                "auto_scoring": True,
+                "ab_session_id": "ab-group-limit",
+                "scoring_max_workers": 2,
+            },
+        )[0]
+        for idx in range(1, 5)
+    ]
+    config = {
+        "runtime": {
+            "ab_session_id": "ab-group-limit",
+            "scoring_max_workers": 2,
+        }
+    }
+    state = {"running": 0, "max_running": 0}
+    lock = asyncio.Lock()
+
+    async def worker(conv_id_arg: str, turn: int, config_arg: dict | None):
+        async with lock:
+            state["running"] += 1
+            state["max_running"] = max(state["max_running"], state["running"])
+        await asyncio.sleep(0.05)
+        async with lock:
+            state["running"] -= 1
+        return {"success": True}
+
+    async def scenario():
+        dispatcher = LiveScoringDispatcher(worker=worker, get_max_workers=lambda: 6)
+        for conv_id in conv_ids:
+            assert await dispatcher.enqueue(conv_id, 1, config=config)
+        assert await dispatcher.wait_for_idle(timeout=2.0)
+
+    asyncio.run(scenario())
+    assert_true(state["max_running"] == 2, f"任务组并发上限未生效: {state}")
 
 
 def test_live_scoring_dispatcher_deduplicates_duplicate_turn_submission():

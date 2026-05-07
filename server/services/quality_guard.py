@@ -13,7 +13,7 @@ class QualityGuard:
     检查项（按优先级）：
       1. 字数 <300 → 需要重试
       2. 字数 >500 → 按段落边界截断至 450 字
-      3. 格式归一到 v2.6：旁白纯文本 + 对白 **""**
+      3. 格式归一到 v4.9：旁白（）包裹 + 对白纯文本
       4. Emoji → 移除
       5. 推理过程前缀 → 剥离
     """
@@ -22,14 +22,18 @@ class QualityGuard:
     MAX_WORDS = 500
     TARGET_WORDS = 450
     MAX_RETRIES = 2
-    DIALOGUE_PATTERN = re.compile(r'\*\*"[^"\n]+?"\*\*')
-    DIALOGUE_LINE_PATTERN = re.compile(
-        r'^(?P<lead>\s*)(?:\*\*)?(?:["“「])(?:\*\*)?(?P<body>.+?)(?:\*\*)?(?:["”」])(?:\*\*)?(?P<trail>\s*)$'
+    # v4.9: 旁白用（）包裹
+    NARRATION_PAREN_PATTERN = re.compile(r'（[^）\n]{4,}）')
+    # 旧版对白格式（用于剥离）
+    OLD_DIALOGUE_PATTERN = re.compile(r'\*\*"[^"\n]+?"\*\*')
+    # 旧版对白行匹配（用于剥离星号和引号）
+    OLD_DIALOGUE_LINE_PATTERN = re.compile(
+        r'^(?P<lead>\s*)(?:\*\*)?(?:["“”「])(?:\*\*)?(?P<body>.+?)(?:\*\*)?(?:["“”」])(?:\*\*)?(?P<trail>\s*)$'
     )
-    DANGLING_DIALOGUE_LINE_PATTERN = re.compile(
-        r'^(?P<lead>\s*)(?:\*\*)?(?:["“「])(?:\*\*)?(?P<body>.+?)(?P<trail>\s*)$'
+    OLD_DANGLING_DIALOGUE_LINE_PATTERN = re.compile(
+        r'^(?P<lead>\s*)(?:\*\*)?(?:["“”「])(?:\*\*)?(?P<body>.+?)(?P<trail>\s*)$'
     )
-    WRAPPED_NARRATION_PATTERN = re.compile(
+    OLD_WRAPPED_NARRATION_PATTERN = re.compile(
         r"(?m)^(?P<lead>\s*)\*(?!\*)(?P<body>[^*\n].*?[^*\n])\*(?P<trail>\s*)$"
     )
     SOFT_BREAK_PATTERN = re.compile(
@@ -181,7 +185,7 @@ class QualityGuard:
         """生成重试时追加的系统消息。"""
         return (
             f"上次输出不符合要求（{reason}），"
-            '请严格按要求重新生成300-500字完整叙事，旁白为纯文本，对白用 **""** 包裹。'
+            '请严格按要求重新生成300-500字完整叙事，旁白用（）包裹，对白为纯文本不带任何标记。'
         )
 
     @classmethod
@@ -248,22 +252,20 @@ class QualityGuard:
             nonlocal changed
             changed = True
             lead = match.group("lead") or ""
-            tag = (match.group("tag") or "").lower()
             body = (match.group("body") or "").lstrip()
-            if tag == "dialogue" and body and body[:1] not in {'"', "“", "「"}:
-                body = f'"{body}'
             return f"{lead}{body}"
 
         return cls.PSEUDO_XML_PREFIX_PATTERN.sub(repl, text), changed
 
     @staticmethod
-    def _normalize_dialogue_lines(text: str) -> tuple[str, bool]:
+    def _strip_old_dialogue_marks(text: str) -> tuple[str, bool]:
+        """v4.9: 剥离旧版 **""** 对白标记，转为纯文本。"""
         changed = False
         normalized_lines = []
         for line in text.splitlines():
-            match = QualityGuard.DIALOGUE_LINE_PATTERN.match(line)
+            match = QualityGuard.OLD_DIALOGUE_LINE_PATTERN.match(line)
             if not match:
-                match = QualityGuard.DANGLING_DIALOGUE_LINE_PATTERN.match(line)
+                match = QualityGuard.OLD_DANGLING_DIALOGUE_LINE_PATTERN.match(line)
                 if not match:
                     normalized_lines.append(line)
                     continue
@@ -271,8 +273,9 @@ class QualityGuard:
             if not body:
                 normalized_lines.append(line)
                 continue
+            # v4.9: 对白为纯文本，去掉所有标记
             normalized_line = (
-                f'{match.group("lead")}**"{body}"**{match.group("trail")}'
+                f'{match.group("lead")}{body}{match.group("trail")}'
             )
             if normalized_line != line:
                 changed = True
@@ -281,25 +284,28 @@ class QualityGuard:
 
     @staticmethod
     def _fix_format(text: str) -> tuple[str, list[str], str]:
-        """检查并修复旁白/对白格式。"""
+        """检查并修复旁白/对白格式（v4.9：旁白（）+ 对白纯文本）。"""
         fixes = []
         processed = text.strip()
         retry_reason = ""
 
-        normalized, dialogue_changed = QualityGuard._normalize_dialogue_lines(processed)
+        # 1. 剥离旧版 **""** 对白标记 → 纯文本
+        normalized, dialogue_changed = QualityGuard._strip_old_dialogue_marks(processed)
         if dialogue_changed:
             processed = normalized
-            fixes.append('对白格式归一为 **""**')
+            fixes.append('剥离旧版 **""** 对白标记→纯文本')
 
-        normalized = QualityGuard.WRAPPED_NARRATION_PATTERN.sub(
-            r"\g<lead>\g<body>\g<trail>", processed
+        # 2. 旧版 *旁白* 转换为 v4.9 的（旁白）
+        normalized = QualityGuard.OLD_WRAPPED_NARRATION_PATTERN.sub(
+            r"\g<lead>（\g<body>）\g<trail>", processed
         )
         if normalized != processed:
             processed = normalized
-            fixes.append("移除旧版*旁白*包裹")
+            fixes.append("旧版*旁白*转换为（）旁白")
 
-        if not QualityGuard.DIALOGUE_PATTERN.search(processed):
-            retry_reason = '格式错误(缺少 **""** 对白标记)'
-            fixes.append('格式重试:缺少 **""** 对白标记')
+        # 3. v4.9 格式检查：确认包含（旁白）格式
+        if not QualityGuard.NARRATION_PAREN_PATTERN.search(processed):
+            retry_reason = '格式错误(缺少（旁白）括号包裹)'
+            fixes.append('格式重试:缺少（）旁白包裹')
 
         return processed, fixes, retry_reason
