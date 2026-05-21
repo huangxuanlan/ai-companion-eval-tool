@@ -1,22 +1,23 @@
 /* ═══ 工具函数 ═══ */
 const $ = id => document.getElementById(id);
 const escapeHtml = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-const DEFAULT_SUMMARY_INTERVAL = 10;
+const DEFAULT_SUMMARY_INTERVAL = 5;
 const DEFAULT_INJECTION_DEPTH = 4;
 const DEFAULT_PRIMARY_MODEL_ID = 'gemma4-31b-local';
 const DEFAULT_SUMMARY_MODEL_ID = 'doubao-lite';
 const DEFAULT_SCORING_MODEL_ID = 'qwen3.6-plus';
 const DEFAULT_PROFILE_MODEL_ID = 'doubao-lite';
 const DEFAULT_AI_SUMMARY_REPORT_MODEL_ID = 'qwen-plus';
-const DEFAULT_SCORING_CONCURRENCY = 24;
+const DEFAULT_SCORING_CONCURRENCY = 2;
 const DEFAULT_SCORING_RETRY_COUNT = 3;
 const DEFAULT_LOW_SCORE_THRESHOLD = 6.0;
 const MAX_BATCH_CONCURRENCY = 24;
 const AB_BATCH_BRANCHES_PER_ROLE = 2;
 const DEFAULT_AB_BATCH_ROLE_CONCURRENCY = 1;
-const DEFAULT_AB_BATCH_SCORING_CONCURRENCY = 2;
 const MAX_AB_BATCH_ROLE_CONCURRENCY = Math.max(1, Math.floor(MAX_BATCH_CONCURRENCY / AB_BATCH_BRANCHES_PER_ROLE));
 const TEST_CENTER_NAV_STORAGE_KEY = 'longformTestCenterNavState';
+const AI_OUTPUT_DISPLAY_STORAGE_KEY = 'longformAiOutputDisplayMode';
+const AI_OUTPUT_DISPLAY_DEFAULT = 'raw';
 const DEFAULT_VOICE_FORBIDDEN = '当前为文字聊天场景，禁止输出任何语音条、语音时长、语音播报提示或"发语音给你"这类表述；只能用文字叙事和对白完成互动。';
 const DEFAULT_THINKING_ENABLED = false;
 const DEFAULT_THINKING_EFFORT = 'high';
@@ -58,6 +59,74 @@ function setLowScoreThreshold(value) {
 
 function getActiveLowScoreThreshold() {
   return Number.isFinite(state.lowScoreThreshold) ? state.lowScoreThreshold : getLowScoreThreshold();
+}
+
+function normalizeAiOutputDisplayMode(value) {
+  return value === 'formatted' ? 'formatted' : AI_OUTPUT_DISPLAY_DEFAULT;
+}
+
+function getAiOutputDisplayMode() {
+  try {
+    return normalizeAiOutputDisplayMode(localStorage.getItem(AI_OUTPUT_DISPLAY_STORAGE_KEY));
+  } catch (_) {
+    return AI_OUTPUT_DISPLAY_DEFAULT;
+  }
+}
+
+function setAiOutputDisplayMode(value) {
+  const mode = normalizeAiOutputDisplayMode(value);
+  try {
+    localStorage.setItem(AI_OUTPUT_DISPLAY_STORAGE_KEY, mode);
+  } catch (_) { /* ignore */ }
+  state.aiOutputDisplayMode = mode;
+  syncAiOutputDisplayToggle();
+  refreshAiOutputDisplayNodes();
+  return mode;
+}
+
+function toggleAiOutputDisplayMode() {
+  const current = normalizeAiOutputDisplayMode(state.aiOutputDisplayMode || getAiOutputDisplayMode());
+  const next = current === 'raw' ? 'formatted' : 'raw';
+  setAiOutputDisplayMode(next);
+  showToast(next === 'raw' ? '已切换为原样输出' : '已切换为格式化显示', 'info');
+}
+
+function syncAiOutputDisplayToggle() {
+  const btn = $('btn-ai-output-display-mode');
+  if (!btn) return;
+  const mode = normalizeAiOutputDisplayMode(state.aiOutputDisplayMode || getAiOutputDisplayMode());
+  btn.dataset.mode = mode;
+  btn.textContent = mode === 'raw' ? '原样' : '格式化';
+  btn.title = mode === 'raw'
+    ? 'AI 输出展示：原样（保留入库文本换行和空格）'
+    : 'AI 输出展示：格式化（阅读增强）';
+}
+
+function renderAiOutput(text, mode = null) {
+  const source = String(text ?? '');
+  const displayMode = normalizeAiOutputDisplayMode(mode || state.aiOutputDisplayMode || getAiOutputDisplayMode());
+  if (displayMode === 'formatted') {
+    return formatNarration(source);
+  }
+  return escapeHtml(source);
+}
+
+function renderAiOutputBlock(text, { className = '', style = '' } = {}) {
+  const source = String(text ?? '');
+  const mode = normalizeAiOutputDisplayMode(state.aiOutputDisplayMode || getAiOutputDisplayMode());
+  const classes = ['ai-output-text', `ai-output-${mode}`, className].filter(Boolean).join(' ');
+  const styleAttr = style ? ` style="${escapeHtml(style)}"` : '';
+  return `<div class="${escapeHtml(classes)}" data-ai-output="${escapeHtml(source)}"${styleAttr}>${renderAiOutput(source, mode)}</div>`;
+}
+
+function refreshAiOutputDisplayNodes() {
+  const mode = normalizeAiOutputDisplayMode(state.aiOutputDisplayMode || getAiOutputDisplayMode());
+  document.querySelectorAll('.ai-output-text[data-ai-output]').forEach(node => {
+    const source = node.dataset.aiOutput || '';
+    node.classList.toggle('ai-output-raw', mode === 'raw');
+    node.classList.toggle('ai-output-formatted', mode === 'formatted');
+    node.innerHTML = renderAiOutput(source, mode);
+  });
 }
 
 function getScoreTurnTotal(score) {
@@ -508,6 +577,7 @@ let state = {
   historyEventConvId: '',
   historyEvents: [],
   lowScoreThreshold: getLowScoreThreshold(),
+  aiOutputDisplayMode: getAiOutputDisplayMode(),
   notificationPermissionRequested: false,
 };
 window._linkedRelationshipVars = window._linkedRelationshipVars || {};
@@ -1358,6 +1428,9 @@ function buildDebugPayloadSnapshot({ modelId = '', messages = [], webSearch = fa
     role_name: formConfig.nickname || '',
     relationship: formConfig.relationship || '',
     personality: formConfig.personality || '',
+    few_shot_file: modules.longform_few_shot || formConfig.few_shot_file || '',
+    few_shot_message_count: 0,
+    few_shot_messages: [],
     system_prompt: modules.system_prompt || getInputValue('f-system-prompt'),
     system_after: '',
     custom_variables: getMergedCustomVariables(),
@@ -1415,6 +1488,9 @@ function normalizeDebugEntry(source = {}, fallback = {}) {
     role_name: basePayload.role_name ?? source.role_name ?? fallback.role_name ?? '',
     relationship: basePayload.relationship ?? source.relationship ?? fallback.relationship ?? '',
     personality: basePayload.personality ?? source.personality ?? fallback.personality ?? '',
+    few_shot_file: basePayload.few_shot_file ?? source.few_shot_file ?? fallback.few_shot_file ?? '',
+    few_shot_message_count: basePayload.few_shot_message_count ?? source.few_shot_message_count ?? fallback.few_shot_message_count ?? 0,
+    few_shot_messages: Array.isArray(basePayload.few_shot_messages) ? basePayload.few_shot_messages : [],
     system_prompt: basePayload.system_prompt ?? source.system_prompt ?? fallback.system_prompt ?? '',
     system_after: basePayload.system_after ?? source.system_after ?? fallback.system_after ?? '',
     custom_variables: basePayload.custom_variables || source.custom_variables || fallback.custom_variables || {},
@@ -1509,6 +1585,13 @@ function renderDebugRequestDetails(payload = {}, messages = []) {
       ['性格', payload.personality || character.personality || '-'],
     ];
     sections.push(`<section class="debug-request-card"><h4>角色上下文</h4>${renderRows(rows)}</section>`);
+  }
+
+  if (payload.few_shot_file || payload.few_shot_message_count || (Array.isArray(payload.few_shot_messages) && payload.few_shot_messages.length)) {
+    sections.push(`<section class="debug-request-card"><h4>Few-shot 示例</h4>${renderRows([
+      ['Few-shot 文件', payload.few_shot_file || '-'],
+      ['解析后消息数', payload.few_shot_message_count ?? 0],
+    ])}</section>`);
   }
 
   const customVariables = payload.custom_variables && typeof payload.custom_variables === 'object' ? payload.custom_variables : {};
@@ -2217,6 +2300,107 @@ function resetChatCanvas(title = '新会话已开启', description = '发送消�
   renderConversationControlRow();
 }
 
+let _pendingModeSwitchState = null;
+
+function compactModeSwitchText(value, limit = 80) {
+  const text = String(value || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length <= limit) return text;
+  return text.slice(0, Math.max(0, limit - 1)).trimEnd() + '…';
+}
+
+function normalizeModeSwitchHistoryItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => ({
+      role: String(item?.role || '').trim(),
+      content: String(item?.content || '').trim(),
+    }))
+    .filter(item => ['user', 'assistant'].includes(item.role) && item.content);
+}
+
+function getChatModeSwitchHistory() {
+  const direct = normalizeModeSwitchHistoryItems(typeof _chatHistory !== 'undefined' ? _chatHistory : []);
+  if (direct.length) return direct;
+  return normalizeModeSwitchHistoryItems((state.turns || []).flatMap(turn => {
+    const items = [];
+    if (turn?.user_input) items.push({ role: 'user', content: turn.user_input });
+    if (turn?.ai_output) items.push({ role: 'assistant', content: turn.ai_output });
+    return items;
+  }));
+}
+
+function getFreeChatModeSwitchHistory() {
+  return normalizeModeSwitchHistoryItems(typeof _freeChatBridgeHistory !== 'undefined' ? _freeChatBridgeHistory : []);
+}
+
+function buildModeSwitchStateFromHistory(history = [], targetMode = 'long') {
+  const dialogue = normalizeModeSwitchHistoryItems(history);
+  if (!dialogue.length) return '';
+  const isShort = targetMode === 'short';
+  const recent = dialogue.slice(isShort ? -6 : -10);
+  const recentUsers = recent.filter(item => item.role === 'user').slice(isShort ? -2 : -4);
+  const recentAssistants = recent.filter(item => item.role === 'assistant').slice(isShort ? -1 : -2);
+  const userLimit = isShort ? 28 : 80;
+  const assistantLimit = isShort ? 48 : 95;
+  const userIntent = recentUsers
+    .map(item => compactModeSwitchText(item.content, userLimit))
+    .filter(Boolean)
+    .join(' / ');
+  const assistantIntent = recentAssistants
+    .map(item => compactModeSwitchText(item.content, assistantLimit))
+    .filter(Boolean)
+    .join(' / ');
+  const parts = [
+    '（以下为切换接话状态，仅供事实参考，不是回复格式示例；当前用户输入优先。）',
+  ];
+  if (userIntent) parts.push(`【最近用户意图】${compactModeSwitchText(userIntent, isShort ? 90 : 220)}`);
+  if (assistantIntent) parts.push(`【上一回复意图】${compactModeSwitchText(assistantIntent, isShort ? 90 : 240)}`);
+  parts.push(`【接话约束】${isShort ? '短文模式：一段自然聊天气泡，避免长段旁白。' : '长文模式：按长文叙事格式承接，但只继承事实，不模仿来源模式。'}`);
+  parts.push('=== 接话状态结束 ===');
+  return parts.join('\n');
+}
+
+function stagePendingModeSwitchState(targetMode = 'long') {
+  const normalizedTarget = targetMode === 'short' ? 'short' : 'long';
+  const sourceHistory = normalizedTarget === 'short'
+    ? getChatModeSwitchHistory()
+    : getFreeChatModeSwitchHistory();
+  const switchState = buildModeSwitchStateFromHistory(sourceHistory, normalizedTarget);
+  _pendingModeSwitchState = switchState
+    ? { targetMode: normalizedTarget, switchState }
+    : null;
+  return switchState;
+}
+
+function applyPendingSwitchStateToPayload(payload, targetMode = 'long', { consume = false } = {}) {
+  if (!_pendingModeSwitchState?.switchState) return payload;
+  const normalizedTarget = targetMode === 'short' ? 'short' : 'long';
+  if (_pendingModeSwitchState.targetMode !== normalizedTarget) return payload;
+  payload.custom_variables = {
+    ...(payload.custom_variables || {}),
+    switch_state: _pendingModeSwitchState.switchState,
+  };
+  if (consume) _pendingModeSwitchState = null;
+  return payload;
+}
+
+function clearPendingModeSwitchState(targetMode = '') {
+  const normalizedTarget = targetMode === 'short' || targetMode === 'long' ? targetMode : '';
+  if (!normalizedTarget || _pendingModeSwitchState?.targetMode === normalizedTarget) {
+    _pendingModeSwitchState = null;
+  }
+}
+
+function getSignatureCustomVariables(customVariables = {}) {
+  const sanitized = { ...(customVariables || {}) };
+  delete sanitized.switch_state;
+  delete sanitized.mode_switch_state;
+  return sanitized;
+}
+
 function buildInteractiveConversationPayload() {
   const payload = buildConversationRunPayload();
   return {
@@ -2274,7 +2458,7 @@ function buildInteractiveConfigSignature(payload = buildInteractiveConversationP
     context: payload.context || {},
     modules: payload.modules || {},
     few_shot_file: String(payload.few_shot_file || '').trim(),
-    custom_variables: payload.custom_variables || {},
+    custom_variables: getSignatureCustomVariables(payload.custom_variables || {}),
   });
 }
 
@@ -2517,6 +2701,7 @@ function connectConversationScoreWebSocket(convId) {
 
 async function createInteractiveConversationSession() {
   const payload = buildInteractiveConversationPayload();
+  applyPendingSwitchStateToPayload(payload, 'long', { consume: true });
   const response = await fetch('/api/conversations/interactive', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2533,8 +2718,9 @@ async function createInteractiveConversationSession() {
 
 async function ensureInteractiveConversationSession({ resetOnConfigChange = false } = {}) {
   const nextSignature = buildInteractiveConfigSignature();
+  const shouldRotateForModeSwitch = _pendingModeSwitchState?.targetMode === 'long' && !!_pendingModeSwitchState.switchState;
   if (state.chatSessionMode === 'interactive' && state.convId) {
-    if (!state.interactiveConfigSignature || state.interactiveConfigSignature === nextSignature) {
+    if (!shouldRotateForModeSwitch && (!state.interactiveConfigSignature || state.interactiveConfigSignature === nextSignature)) {
       state.interactiveConfigSignature = state.interactiveConfigSignature || nextSignature;
       return { id: state.convId, recreated: false, reason: '' };
     }
@@ -2557,7 +2743,7 @@ async function ensureInteractiveConversationSession({ resetOnConfigChange = fals
       updateProgress(0, 1);
     }
     const session = await createInteractiveConversationSession();
-    return { id: session.id, recreated: true, reason: 'config-changed' };
+    return { id: session.id, recreated: true, reason: shouldRotateForModeSwitch ? 'mode-switch' : 'config-changed' };
   }
   const session = await createInteractiveConversationSession();
   return { id: session.id, recreated: true, reason: 'created' };
@@ -3355,10 +3541,15 @@ async function sendChatMessage() {
   let sessionState = null;
   try {
     sessionState = await ensureInteractiveConversationSession({ resetOnConfigChange: true });
-    if (sessionState?.reason === 'config-changed') {
+    if (['config-changed', 'mode-switch'].includes(sessionState?.reason)) {
       _chatHistory = [];
       await loadHistory();
-      showToast('检测到角色或提示词已变更，已自动切换到新会话', 'info');
+      showToast(
+        sessionState.reason === 'mode-switch'
+          ? '已切换到新会话，旧上下文已压缩为接话状态'
+          : '检测到角色或提示词已变更，已自动切换到新会话',
+        'info',
+      );
     }
   } catch (e) {
     showToast('创建会话失败: ' + e.message, 'error');
@@ -3449,7 +3640,7 @@ async function sendChatMessage() {
 
       aiBubble.innerHTML = `
         <div class="chat-label" style="color:var(--primary-color)">🤖 ${escapeHtml(first.model_id || modelId)}</div>
-        <div class="chat-content" style="line-height:1.6;font-size:13px">${formatNarration ? formatNarration(aiOutput) : escapeHtml(aiOutput)}</div>
+        ${renderAiOutputBlock(aiOutput, { className: 'chat-content', style: 'line-height:1.6;font-size:13px' })}
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${metaText}</div>
         <div style="font-size:12px;margin-top:4px;display:flex;align-items:center;justify-content:space-between;gap:4px;flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:6px" class="ai-score-line">
@@ -3735,7 +3926,6 @@ function renderTurnBubbles(turn, turnIdx) {
   const aiReply = turn.ai_output || turn.assistant_reply || turn.ai_response || turn.response || '';
   if (aiReply) {
     const ab = document.createElement('div'); ab.className = 'chat-bubble ai';
-    const formatted = formatNarration(aiReply);
     const turnNumber = turn.turn || turn.turn_order || turnIdx;
     ab.dataset.turn = String(turnNumber);
     const hasManualScore = turn.manual_star_score !== undefined
@@ -3788,7 +3978,7 @@ function renderTurnBubbles(turn, turnIdx) {
           <span class="manual-score-trigger" style="cursor:pointer;opacity:0.7" title="人工打分">[✏️]</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="cursor:pointer;opacity:0.7" title="复制" onclick="navigator.clipboard.writeText(this.closest('.chat-bubble').querySelector('div:nth-child(3)').textContent).then(()=>window.showToast('已复制','success'))">📋</span>
+          <span style="cursor:pointer;opacity:0.7" title="复制" onclick="navigator.clipboard.writeText(this.closest('.chat-bubble').querySelector('.ai-output-text').textContent).then(()=>window.showToast('已复制','success'))">📋</span>
           <span class="msg-regenerate-trigger" style="${regenerateStyle}" title="${regenerateTitle}">🔄</span>
           <span class="msg-debug-toggle" style="cursor:pointer;opacity:0.7;font-size:11px" title="查看调试详情">📄调试</span>
         </div>
@@ -3805,7 +3995,7 @@ function renderTurnBubbles(turn, turnIdx) {
         </div>
       </div>`;
 
-    ab.innerHTML = `<div class="chat-label">🤖 AI · Turn ${turnIdx}</div>${tagsHtml}<div>${formatted}</div>${metaHtml}${bottomBarHtml}${manualHtml}${debugHtml}`;
+    ab.innerHTML = `<div class="chat-label">🤖 AI · Turn ${turnIdx}</div>${tagsHtml}${renderAiOutputBlock(aiReply)}${metaHtml}${bottomBarHtml}${manualHtml}${debugHtml}`;
 
     // AI评分 Popover 点击事件
     const aiScoreTrigger = ab.querySelector('.ai-score-trigger');
@@ -4163,6 +4353,9 @@ function formatNarration(text) {
     .map(normalizeDialogueLine)
     .join('\n');
   return escapeHtml(normalized)
+    // 格式化模式：只在转义后的文本上做基础 Markdown 阅读增强，避免渲染原始 HTML
+    .replace(/`([^`\n]+?)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
     // v4.9: （旁白内容） → 斜体灰色渲染
     .replace(/\uff08([^\uff09\n]{2,})\uff09/g, '<span class="narration">$1</span>')
     // 兼容旧数据: **"对白"** → 加粗渲染
@@ -4236,7 +4429,10 @@ function renderDebugView(turnIdx) {
     // D-1: 消息层级标签
     let layerTag = '';
     if (m.role === 'system') {
-      if (idx === 0) layerTag = '<span class="badge badge-info" style="font-size:10px;margin-left:6px">L0-L4 System</span>';
+      const hasEmbeddedFewShot = /写作风格示例开始|writing_style_example|Few-shot\s*风格示例|风格示例正文/.test(content);
+      if (idx === 0 && hasEmbeddedFewShot) layerTag = '<span class="badge badge-info" style="font-size:10px;margin-left:6px">System + Few-shot</span>';
+      else if (idx === 0) layerTag = '<span class="badge badge-info" style="font-size:10px;margin-left:6px">L0-L4 System</span>';
+      else if (hasEmbeddedFewShot) layerTag = '<span class="badge badge-info" style="font-size:10px;margin-left:6px">Few-shot</span>';
       else if (/以上为.*示例|风格参考|以下为真实对话/.test(content)) layerTag = '<span class="badge badge-warning" style="font-size:10px;margin-left:6px">隔离声明</span>';
       else if (/请记住.*你是|记住.*性格|当前关系阶段/.test(content)) layerTag = '<span class="badge badge-info" style="font-size:10px;margin-left:6px">Depth注入</span>';
       else if (/Core_Constraints|长度.*300.*500|旁白纯文本/.test(content)) layerTag = '<span class="badge badge-danger" style="font-size:10px;margin-left:6px">Core约束</span>';
@@ -4463,22 +4659,25 @@ function renderSidebarHistory(convs) {
   sb.innerHTML = '';
   (convs || []).forEach(c => {
     const convId = c.id || c.conversation_id;
+    const isActive = String(state.convId || '') === String(convId || '');
     const roleName = c.nickname || c.character_name || '默认角色';
     const characterType = c.character_type || '';
     const titleText = `🎭 ${roleName}${characterType ? `·${characterType}` : ''}`;
     const previewText = truncateText(c.last_message_preview || '暂无消息', 20);
     const timeText = formatRelativeTime(c.updated_at || c.created_at || c.timestamp);
     const item = document.createElement('div');
-    item.className = `history-item${state.convId === convId ? ' active' : ''}${c.pinned ? ' pinned' : ''}`;
+    item.className = `history-item${isActive ? ' active' : ''}${c.pinned ? ' pinned' : ''}`;
     item.dataset.status = String(c.status || 'pending').replace(/^completed_.*/, 'completed');
     item.setAttribute('role', 'button');
     item.setAttribute('tabindex', '0');
+    if (isActive) item.setAttribute('aria-current', 'true');
     item.title = `${roleName} · ${timeText || '刚刚'} · ${getConversationStatusLabel(c.status)}`;
     item.innerHTML = `
       <span class="history-avatar">${escapeHtml(roleName.slice(0, 1) || '默')}</span>
       <span class="history-body">
         <span class="history-title-row">
           <span class="history-title">${escapeHtml(titleText)}</span>
+          ${isActive ? '<span class="history-current-badge">当前</span>' : ''}
         </span>
         <span class="history-preview">${escapeHtml(previewText)}</span>
         <span class="history-meta">${escapeHtml(`${timeText || '刚刚'} · ${getConversationStatusLabel(c.status)}`)}</span>
@@ -6663,9 +6862,23 @@ async function retryFailedScoringItems() {
     );
 
     // 刷新历史列表与汇总
-    if (typeof loadHistory === 'function') loadHistory();
+    if (typeof loadHistory === 'function') await loadHistory();
+    await refreshCurrentBatchRunState();
   } finally {
     if (toolbarBtn) { toolbarBtn.disabled = false; toolbarBtn.textContent = '🔁 重试失败/未完成项'; }
+  }
+}
+
+async function refreshCurrentBatchRunState() {
+  const runId = String(state.batchRunId || '').trim();
+  if (!runId) return null;
+  try {
+    const run = await fetchOrchestrationRun(runId);
+    if (run) applyBatchOrchestrationRun(run);
+    return run || null;
+  } catch (error) {
+    console.warn('[batch-run-refresh] 刷新批量任务状态失败:', error?.message || error);
+    return null;
   }
 }
 
@@ -8452,6 +8665,12 @@ function applyBatchRunItemToRow(row, item, { isDryRun, autoScoringEnabled } = {}
   const normalizedStatus = String(item.status || 'pending').trim().toLowerCase();
   row.started = normalizedStatus !== 'pending';
   row.finished = isTerminalOrchestrationStatus(normalizedStatus);
+  const convId = String(item.conversation_id || '').trim();
+  const turnCount = Number(item.turn_count || 0);
+  const failedTurns = Number(item.failed_turns || 0);
+  const pendingScoringTurns = Number(item.pending_scoring_turns || 0);
+  const avgScore = Number.parseFloat(item.avg_score);
+  const settledScoreTurns = Number(item.scored_turns || 0) + failedTurns + Number(item.skipped_turns || 0);
 
   if (row.turnCountEl) row.turnCountEl.textContent = String(item.turn_count || 0);
   if (row.avgCharsEl) row.avgCharsEl.textContent = String(item.avg_chars || 0);
@@ -8465,7 +8684,6 @@ function applyBatchRunItemToRow(row, item, { isDryRun, autoScoringEnabled } = {}
     row.statusCell.innerHTML = `<span class="status-badge ${statusCls}">${escapeHtml(statusLabel)}</span>${errorHtml}`;
   }
 
-  const convId = String(item.conversation_id || '').trim();
   if (row.actionCell) {
     const actions = [];
     if (convId) {
@@ -8474,14 +8692,22 @@ function applyBatchRunItemToRow(row, item, { isDryRun, autoScoringEnabled } = {}
     if (convId && normalizedStatus === 'completed' && !isDryRun && !autoScoringEnabled) {
       actions.push(`<button class="btn btn-secondary" onclick="triggerConversationScoringFromBatch('${convId}', this)">补评分</button>`);
     }
+    if (
+      convId
+      && !isDryRun
+      && autoScoringEnabled
+      && turnCount > 0
+      && normalizedStatus !== 'scoring'
+      && (failedTurns > 0 || pendingScoringTurns > 0 || (normalizedStatus === 'completed' && !Number.isFinite(avgScore)))
+    ) {
+      const label = failedTurns > 0 ? '重试失败项' : '同步评分';
+      actions.push(`<button class="btn btn-secondary" onclick="triggerConversationScoringFromBatch('${convId}', this)">${label}</button>`);
+    }
     row.actionCell.innerHTML = actions.length ? actions.join(' ') : '<span style="color:var(--text-tertiary)">-</span>';
   }
 
   if (row.scoreCell) {
     row.scoreCell.dataset.convId = convId;
-    const avgScore = Number.parseFloat(item.avg_score);
-    const settledScoreTurns = Number(item.scored_turns || 0) + Number(item.failed_turns || 0) + Number(item.skipped_turns || 0);
-    const turnCount = Number(item.turn_count || 0);
     if (isDryRun) {
       row.scoreCell.textContent = '-';
       row.scoreCell.title = '演练模式不执行评分';
@@ -8703,7 +8929,23 @@ async function triggerConversationScoringFromBatch(convId, btnEl) {
   } catch (_) { }
 
   try {
-    const scoreData = await ensureConversationScored(id);
+    const current = await fetchConversationScoreResults(id);
+    const actionMeta = getConversationScoringActionMeta(current);
+    if (btn) btn.textContent = `${actionMeta.label}中…`;
+    const payload = await runConversationScoringAction(id, actionMeta.action, { preferLatestPrompt: true });
+    let scoreData = current;
+    if (actionMeta.action === 'repair_summary') {
+      scoreData = await fetchConversationScoreResults(id).catch(() => current);
+    } else if (actionMeta.action !== 'view_results' && payload.status !== 'already_scored') {
+      scoreData = await watchConversationScoreRefresh(id, { allowDelayed: true });
+      if (scoreData?._sync_delayed) {
+        showToast('评分仍在后台处理中，稍后会同步到测试中心和历史记录', 'info');
+      }
+    } else {
+      scoreData = await fetchConversationScoreResults(id).catch(() => current);
+    }
+    await refreshCurrentBatchRunState();
+    if (typeof loadHistory === 'function') await loadHistory().catch(() => null);
     const summary = lastSummary || scoreData?.summary;
     const avg = Number(summary?.avg_total);
     const scored = summary?.scored_count || 0;
@@ -10377,10 +10619,7 @@ function buildABBatchBranchItem(cfg, {
   });
   payload.prompt_version = String(promptVersion || payload.prompt_version || '').trim();
   payload.auto_scoring = !dryRun;
-  payload.scoring_max_workers = Math.min(
-    normalizeScoringConcurrency(payload.scoring_max_workers),
-    DEFAULT_AB_BATCH_SCORING_CONCURRENCY,
-  );
+  payload.scoring_max_workers = normalizeScoringConcurrency(payload.scoring_max_workers);
   return {
     key: `${groupKey}:${variant}`,
     label,
@@ -11546,7 +11785,7 @@ function applyABConversationToSide(variant, conversation) {
     side.latestTurn = Number(latest.turn || results.length);
     side.latestReply = String(latest.ai_output || '').trim();
     const contentEl = $(variant === 'base' ? 'ab-base-content' : 'ab-compare-content');
-    if (contentEl) contentEl.innerHTML = formatNarration(side.latestReply);
+    if (contentEl) contentEl.innerHTML = renderAiOutputBlock(side.latestReply);
   }
   renderABSideStatus(variant);
 }
@@ -11584,7 +11823,7 @@ function connectABConversationSocket(variant) {
           stopWaitingTracker(`ab-${variant}-task`);
         }
         const contentEl = $(variant === 'base' ? 'ab-base-content' : 'ab-compare-content');
-        if (contentEl) contentEl.innerHTML = formatNarration(side.latestReply);
+        if (contentEl) contentEl.innerHTML = renderAiOutputBlock(side.latestReply);
       }
       renderABSideStatus(variant);
     } else if (msg.type === 'completed' || msg.type === 'done') {
@@ -11840,11 +12079,11 @@ async function startHistoryCompare() {
       html += `<div style="background:var(--bg-hover);border-radius:8px;padding:12px;border:1px solid var(--border-light)">`;
       html += `<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:6px">🔵 Turn ${i + 1}${sBadge(scoreA)}</div>`;
       html += `<div style="font-size:12px;color:var(--primary-color);margin-bottom:4px">${escapeHtml(tA?.user_input || '—')}</div>`;
-      html += `<div style="font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto">${formatNarration(tA?.ai_output || '无数据')}</div></div>`;
+      html += `${renderAiOutputBlock(tA?.ai_output || '无数据', { style: 'font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto' })}</div>`;
       html += `<div style="background:#10b9810d;border-radius:8px;padding:12px;border:1px solid #10b98140">`;
       html += `<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:6px">🟢 Turn ${i + 1}${sBadge(scoreB)}</div>`;
       html += `<div style="font-size:12px;color:#10b981;margin-bottom:4px">${escapeHtml(tB?.user_input || '—')}</div>`;
-      html += `<div style="font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto">${formatNarration(tB?.ai_output || '无数据')}</div></div>`;
+      html += `${renderAiOutputBlock(tB?.ai_output || '无数据', { style: 'font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto' })}</div>`;
       html += `</div>`;
     }
     // 汇总评分对比
@@ -12241,7 +12480,9 @@ async function uploadPrompt(event) {
 /* ═══ 普通聊天与模型对比 ═══ */
 let _compareModeActive = false;
 window.toggleCompareMode = function () {
-  _compareModeActive = !_compareModeActive;
+  const nextCompareMode = !_compareModeActive;
+  stagePendingModeSwitchState(nextCompareMode ? 'short' : 'long');
+  _compareModeActive = nextCompareMode;
   console.log('toggleCompareMode triggered, state:', _compareModeActive);
   if (_compareModeActive) {
     switchPage('freechat');
@@ -12264,6 +12505,7 @@ window.toggleCompareMode = function () {
 let freeChatPrompts = {}; // 独立模型的 Prompt 存储
 let freeChatSamplingConfigs = {};
 let freeChatSessions = {};
+let _freeChatBridgeHistory = [];
 let _freeChatSlotCounter = 0;
 let _currentFreeChatModel = null;
 let _webSearchEnabled = false;
@@ -12400,6 +12642,7 @@ function updateFreeChatReportState() {
 
 function buildFreeChatConversationPayload(modelId) {
   const payload = buildInteractiveConversationPayload();
+  applyPendingSwitchStateToPayload(payload, 'short', { consume: false });
   const sampling = getStoredFreeChatSamplingConfig(modelId);
   payload.model_id = modelId;
   payload.prompt_version = getInputValue('f-prompt-version') || payload.prompt_version;
@@ -12415,12 +12658,28 @@ function buildFreeChatConversationPayload(modelId) {
   return payload;
 }
 
+function appendFreeChatBridgeTurn(userInput, results = []) {
+  const successful = (Array.isArray(results) ? results : []).find(item => item?.success && item.ai_output);
+  if (!String(userInput || '').trim() && !successful) return;
+  if (String(userInput || '').trim()) {
+    _freeChatBridgeHistory.push({ role: 'user', content: String(userInput || '').trim() });
+  }
+  if (successful?.ai_output) {
+    _freeChatBridgeHistory.push({ role: 'assistant', content: String(successful.ai_output || '').trim() });
+  }
+  _freeChatBridgeHistory = _freeChatBridgeHistory.slice(-10);
+}
+
 async function ensureFreeChatConversationSession(slot) {
   const slotKey = slot.dataset.slotKey;
   const modelId = slot.dataset.modelId;
   const modelName = slot.dataset.modelName;
   const existing = freeChatSessions[slotKey];
-  if (existing?.convId && existing.modelId === modelId) return existing;
+  const shouldRotateForModeSwitch = _pendingModeSwitchState?.targetMode === 'short' && !!_pendingModeSwitchState.switchState;
+  if (existing?.convId && existing.modelId === modelId && !shouldRotateForModeSwitch) return existing;
+  if (existing?.convId && shouldRotateForModeSwitch) {
+    await completeConversationById(existing.convId);
+  }
   const payload = buildFreeChatConversationPayload(modelId);
   const response = await fetch('/api/conversations/interactive', {
     method: 'POST',
@@ -12579,6 +12838,7 @@ async function sendFreeChat() {
   area.scrollTop = area.scrollHeight;
   try {
     const sessions = await Promise.all(slots.map(slot => ensureFreeChatConversationSession(slot)));
+    clearPendingModeSwitchState('short');
     const results = await Promise.all(sessions.map(async (session, index) => {
       const dialogueThinking = getDialogueThinkingState(session.modelId);
       const response = await fetch(`/api/conversations/${session.convId}/generate`, {
@@ -12616,6 +12876,7 @@ async function sendFreeChat() {
         convId: session.convId,
       };
     }));
+    appendFreeChatBridgeTurn(input, results);
     const colors = ['#1664ff', '#00b42a', '#ff7d00'];
     const grid = document.createElement('div');
     grid.style.cssText = `display:grid;grid-template-columns:repeat(${results.length},1fr);gap:12px;width:100%`;
@@ -12626,11 +12887,11 @@ async function sendFreeChat() {
       const name = slots[i]?.dataset?.modelName || res.modelName || res.model_id;
       const content = res.success ? (res.ai_output || '(无内容)') : `\u274c ${res.error}`;
       const renderedContent = res.success
-        ? (formatNarration ? formatNarration(content) : escapeHtml(content))
-        : escapeHtml(content);
+        ? renderAiOutputBlock(content, { style: 'line-height:1.6;font-size:13px' })
+        : `<div style="line-height:1.6;font-size:13px">${escapeHtml(content)}</div>`;
       const tokens = res.success ? `${res.input_tokens || 0}+${res.output_tokens || 0} tok · ${(res.latency_s || 0).toFixed(1)}s` : '';
       const extra = res.convId ? `<div style="margin-top:8px"><button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="viewConversation('${res.convId}')">查看对话</button></div>` : '';
-      card.innerHTML = `<div class="chat-label" style="color:${colors[i % 3]}">🤖 ${escapeHtml(name)}</div><div style="line-height:1.6;font-size:13px">${renderedContent}</div>${tokens ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${tokens}</div>` : ''}${extra}`;
+      card.innerHTML = `<div class="chat-label" style="color:${colors[i % 3]}">🤖 ${escapeHtml(name)}</div>${renderedContent}${tokens ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${tokens}</div>` : ''}${extra}`;
       grid.appendChild(card);
     });
     area.appendChild(grid);
@@ -12645,6 +12906,7 @@ async function sendFreeChat() {
 async function clearFreeChat({ preserveSlots = false } = {}) {
   await finalizeFreeChatSessions();
   freeChatSessions = {};
+  _freeChatBridgeHistory = [];
   state.compareReportId = '';
   renderFreeChatEmptyState();
   updateFreeChatReportState();
@@ -14004,6 +14266,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) stopTitleFlash();
   });
+  syncAiOutputDisplayToggle();
   window.addEventListener('focus', stopTitleFlash);
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.shared-model-picker')) {

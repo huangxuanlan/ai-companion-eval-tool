@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
-from config import DEFAULT_PRIMARY_MODEL, DEFAULT_SUMMARY_MODEL
+from config import DEFAULT_PRIMARY_MODEL, DEFAULT_SUMMARY_INTERVAL, DEFAULT_SUMMARY_MODEL
 
 
 class ConversationCreate(BaseModel):
@@ -29,7 +29,7 @@ class ConversationCreate(BaseModel):
     scoring_thinking_effort: Optional[str] = None
     scoring_max_workers: Optional[int] = Field(default=None, ge=1, le=24)
     scoring_retry_count: Optional[int] = Field(default=None, ge=0, le=10)
-    summary_interval: int = 10
+    summary_interval: int = DEFAULT_SUMMARY_INTERVAL
     injection_depth: int = Field(default=4, ge=1)
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
@@ -159,11 +159,12 @@ class InteractiveConversationCreate(BaseModel):
     scoring_thinking_effort: Optional[str] = None
     scoring_max_workers: Optional[int] = Field(default=None, ge=1, le=24)
     scoring_retry_count: Optional[int] = Field(default=None, ge=0, le=10)
-    summary_interval: int = 10
+    summary_interval: int = DEFAULT_SUMMARY_INTERVAL
     injection_depth: int = Field(default=4, ge=1)
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     auto_scoring: bool = True
+    dry_run: bool = False
     character: dict = Field(default_factory=dict)
     context: dict = Field(default_factory=dict)
     modules: dict = Field(default_factory=dict)

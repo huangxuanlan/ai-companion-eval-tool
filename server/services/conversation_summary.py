@@ -52,6 +52,9 @@ def generate_summary(
         "{personal_type}": personal_type,
         "{relationship}": relationship,
         "{conversation_text}": conversation_text,
+        "{conversation_log}": conversation_text,
+        "{existing_summary}": "",
+        "{current_mode}": "longform",
     }
     for placeholder, value in replacements.items():
         prompt_text = prompt_text.replace(placeholder, value)

@@ -391,7 +391,11 @@ def fill_user_prompt(user_template, row, config):
         )
 
         assert service._resolve_scoring_api_key("gemma4-31b") == "google-single-key"
-        assert service._resolve_scoring_api_keys("gemma4-31b") == ["google-key-a", "google-key-b"]
+        assert service._resolve_scoring_api_keys("gemma4-31b") == [
+            "google-key-a",
+            "google-key-b",
+            "google-single-key",
+        ]
         assert service.is_available("gemma4-31b") is True
     finally:
         _clear_score_excel_cache()
@@ -401,7 +405,7 @@ def test_scoring_service_prefers_model_provider_connection_over_global_scoring_e
     monkeypatch,
 ):
     monkeypatch.setenv("SCORING_API_KEY", "google-global-key")
-    monkeypatch.setenv("SCORING_API_KEYS", "google-global-a, google-global-b")
+    monkeypatch.setenv("SCORING_API_KEYS", "google-global-a, google-global-b, google-direct-a")
     monkeypatch.setenv("GOOGLE_API_KEY", "google-direct-key")
     monkeypatch.setenv("GOOGLE_API_KEYS", "google-direct-a, google-direct-b")
     monkeypatch.setenv("VOLCENGINE_API_KEY", "volcengine-direct-key")
@@ -417,6 +421,10 @@ def test_scoring_service_prefers_model_provider_connection_over_global_scoring_e
     assert service._resolve_scoring_api_keys("gemma-4-31b-it") == [
         "google-global-a",
         "google-global-b",
+        "google-direct-a",
+        "google-global-key",
+        "google-direct-b",
+        "google-direct-key",
     ]
 
 

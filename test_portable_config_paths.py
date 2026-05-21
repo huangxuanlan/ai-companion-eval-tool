@@ -13,8 +13,10 @@ if str(SERVER_DIR) not in sys.path:
 
 
 def _reload_config():
-    sys.modules.pop("config", None)
-    return importlib.import_module("config")
+    # 使用 importlib.reload 而不是 pop+import_module，避免替换 sys.modules['config']
+    # 后导致其他测试缓存的旧模块对象失效（importlib.reload 要求模块已在 sys.modules）。
+    import config
+    return importlib.reload(config)
 
 
 def test_config_supports_bundle_relative_paths(monkeypatch, tmp_path: Path):

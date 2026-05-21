@@ -541,6 +541,10 @@ class ModelAdapter:
     def _get_provider(self, model_id: str):
         """获取或创建指定模型的 Provider 实例"""
         model_id = self.normalize_model_id(model_id)
+        raw_config = self._models.get(model_id, {}) or {}
+        provider_type = str(raw_config.get("provider", "") or "").strip()
+        if provider_type in ("google", "google_gemini", "nvidia"):
+            return self._instantiate_provider(model_id)
         with _PROVIDER_LOAD_LOCK:
             if model_id in self._providers:
                 return self._providers[model_id]

@@ -358,6 +358,41 @@ def test_build_scoring_action_state_prefers_retry_failed_when_partial_scores_exi
     assert action_state["has_pending_turns"] is True
 
 
+def test_build_scoring_action_state_retries_failed_even_when_all_turns_settled(monkeypatch):
+    conversation = {"id": "conv-settled-failed", "status": "completed", "results": []}
+    summary = {
+        "avg_total": 6.6,
+        "scored_count": 2,
+        "failed_count": 1,
+        "skipped_count": 0,
+        "total_count": 3,
+    }
+    report_meta = {
+        "ai_report_status": "pending",
+        "ai_report_label": "等待生成报告",
+        "ai_report_ready": False,
+        "ai_report_updated_at": "",
+    }
+
+    monkeypatch.setattr(scoring_router_module.task_control, "get", lambda _key: None)
+    monkeypatch.setattr(
+        scoring_router_module.get_live_scoring_dispatcher(),
+        "has_activity",
+        lambda _conv_id: False,
+    )
+
+    action_state = scoring_router_module._build_scoring_action_state(
+        "conv-settled-failed",
+        conversation,
+        summary,
+        report_meta,
+    )
+
+    assert action_state["recommended_action"] == "retry_failed_turns"
+    assert action_state["all_turns_settled"] is True
+    assert action_state["repair_summary_needed"] is True
+
+
 def test_build_scoring_action_state_prefers_resume_sync_when_runtime_is_active(monkeypatch):
     conversation = {"id": "conv-active", "status": "completed", "results": []}
     summary = {

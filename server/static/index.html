@@ -72,6 +72,8 @@
       </div>
       <div class="header-right" style="display:flex;align-items:center;gap:8px">
         <div id="chat-top-tools" style="display:flex;gap:8px">
+          <button class="btn btn-secondary ai-output-toggle" id="btn-ai-output-display-mode" title="AI 输出展示：原样"
+            style="padding:6px" onclick="toggleAiOutputDisplayMode()">原样</button>
           <button class="btn btn-secondary" id="btn-clear-chat" title="清除上下文" style="padding:6px"
             onclick="confirmClearChatContext()">🗑️</button>
           <button class="btn btn-secondary" id="btn-toggle-compare" title="模型对比" style="padding:6px"
@@ -682,9 +684,9 @@
                 </div>
                 <div class="form-item" style="margin:0">
                   <label class="form-label" for="tc-scoring-concurrency">打分并发
-                    <span id="tc-scoring-concurrency-display" style="margin-left:6px;color:var(--primary-color)">24</span>
+                    <span id="tc-scoring-concurrency-display" style="margin-left:6px;color:var(--primary-color)">2</span>
                   </label>
-                  <input type="range" id="tc-scoring-concurrency" min="1" max="24" value="24">
+                  <input type="range" id="tc-scoring-concurrency" min="1" max="24" value="2">
                 </div>
                 <div class="form-item" style="margin:0">
                   <label class="form-label">失败自动重试</label>
@@ -699,7 +701,7 @@
                   <button type="button" class="btn btn-secondary btn-sm" id="tc-scoring-reset-defaults" onclick="resetScoringDefaults()">恢复系统默认</button>
                 </div>
                 <div id="tc-scoring-default-status" style="font-size:12px;color:var(--text-tertiary);line-height:1.6">
-                  已保存默认：qwen3.6-plus / 思考 high / 并发 24 / 重试 3 次
+                  已保存默认：qwen3.6-plus / 思考 high / 并发 2 / 重试 3 次
                 </div>
               </div>
             </div>
@@ -1970,7 +1972,7 @@
       <div id="history-summary-task-fill" class="batch-rescore-float-fill" style="width:0%"></div>
     </div>
   </div>
-  <script src="js/legacy_bundle.js?v=96" defer></script>
+  <script src="js/legacy_bundle.js?v=97" defer></script>
 </body>
 
 </html>

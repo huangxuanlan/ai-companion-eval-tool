@@ -888,12 +888,17 @@ class SlowCapturingModelAdapter(CapturingModelAdapter):
 
 def test_batch_create_returns_quickly_and_fourth_request_queues(client: TestClient):
     original_auto_score = scoring_router.score_turn_if_available
+    original_enqueue_live_score = scoring_router.enqueue_live_score_turn
     original_max_concurrency = conversations_router._MAX_CONCURRENT_CONVERSATIONS
 
     async def _skip_auto_score(*args, **kwargs):
         return None
 
+    async def _skip_live_score_enqueue(*args, **kwargs):
+        return False
+
     scoring_router.score_turn_if_available = _skip_auto_score
+    scoring_router.enqueue_live_score_turn = _skip_live_score_enqueue
     # 用较小并发上限稳定复现排队逻辑（避免默认并发变更导致用例退化）
     conversations_router._MAX_CONCURRENT_CONVERSATIONS = 3
     conversations_router._conv_service = ConversationService(
@@ -948,6 +953,7 @@ def test_batch_create_returns_quickly_and_fourth_request_queues(client: TestClie
                 break
             time.sleep(0.1)
         scoring_router.score_turn_if_available = original_auto_score
+        scoring_router.enqueue_live_score_turn = original_enqueue_live_score
         conversations_router._MAX_CONCURRENT_CONVERSATIONS = original_max_concurrency
         conversations_router._conv_service = None
         conversations_router._running_conversations.clear()
@@ -3156,6 +3162,79 @@ def test_interactive_conversation_session_flow(client: TestClient):
     assert_true(cleared.get("results") == [], "清除上下文后 turn 未被清空")
 
 
+def test_interactive_create_prewarms_dialogue_summary_with_lite_model(client: TestClient):
+    create_response = client.post(
+        "/api/conversations/interactive",
+        json={
+            "model_id": "doubao-pro",
+            "model_mini": "doubao-seed-2-0-lite-260215",
+            "summary_interval": 5,
+            "dry_run": True,
+            "character": {"Role_Nickname": "摘要预热角色", "personality": "冷静"},
+            "context": {"relationship": "朋友", "scene": "客厅"},
+            "modules": {},
+        },
+    )
+    assert_true(create_response.status_code == 200, create_response.text)
+    conv_id = create_response.json()["id"]
+
+    def _summary_completed():
+        conversation = db.get_conversation(conv_id) or {}
+        runtime = conversation.get("config", {}).get("runtime", {})
+        return (
+            runtime.get("summary_job_status") == "completed"
+            and bool(str(runtime.get("latest_dialogue_summary", "")).strip())
+        )
+
+    wait_for_condition(_summary_completed, timeout=5.0, message="交互会话创建后未完成摘要预热")
+    conversation = db.get_conversation(conv_id) or {}
+    runtime = conversation.get("config", {}).get("runtime", {})
+    assert_true(conversation.get("model_mini") == "doubao-lite", "摘要模型未归一化为 doubao-lite")
+    assert_true(runtime.get("summary_job_target_turn") == 0, "摘要预热目标轮次应为 0")
+
+
+def test_interactive_create_loads_previous_dialogue_summary_before_warmup(client: TestClient):
+    previous_summary = "=== 之前剧情摘要 ===\n上一通持久化摘要\n=== 摘要结束 ==="
+    previous_config = {
+        "character": {"Role_Nickname": "跨会话摘要角色", "personality": "冷静"},
+        "context": {"relationship": "朋友"},
+        "modules": {},
+        "runtime": {"model_ids": ["doubao-pro"], "summary_interval": 5},
+    }
+    previous_id = db.create_conversation("doubao-pro", previous_config, model_mini="doubao-lite")
+    db.insert_turn_result(
+        previous_id,
+        {
+            "turn": 1,
+            "user_input": "上一通用户输入",
+            "ai_output": "上一通角色回复",
+            "dialogue_summary": previous_summary,
+            "model_id": "doubao-pro",
+        },
+    )
+    db.update_conversation_status(previous_id, "completed")
+
+    create_response = client.post(
+        "/api/conversations/interactive",
+        json={
+            "model_id": "doubao-pro",
+            "model_mini": "doubao-seed-2-0-lite-260215",
+            "summary_interval": 5,
+            "dry_run": True,
+            "character": {"Role_Nickname": "跨会话摘要角色", "personality": "冷静"},
+            "context": {"relationship": "朋友", "scene": "客厅"},
+            "modules": {},
+        },
+    )
+    assert_true(create_response.status_code == 200, create_response.text)
+    conv_id = create_response.json()["id"]
+    conversation = db.get_conversation(conv_id) or {}
+    runtime = conversation.get("config", {}).get("runtime", {})
+    assert_true(runtime.get("latest_dialogue_summary") == previous_summary, "未冷启动加载上一通摘要")
+    assert_true(conversation.get("config", {}).get("dialogue_summary") == previous_summary, "上一通摘要未写入种子摘要")
+    assert_true(runtime.get("summary_job_status") == "completed", "加载上一通摘要后不应再等待空历史预热")
+
+
 def test_interactive_generate_surfaces_model_failure(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     payload = {
         "model_id": "doubao-pro",
@@ -3798,6 +3877,108 @@ def test_live_scoring_uses_single_layer_retry_and_timeout(monkeypatch):
         captured.get("provider_retry_delays") == (),
         f"live scoring 未禁用 provider retry: {captured}",
     )
+
+
+def test_live_scoring_timeout_defaults_to_global_scoring_timeout(monkeypatch):
+    conv_id, config = create_unscored_conversation(
+        "live timeout 默认继承会话",
+        turn_count=1,
+        runtime={
+            "auto_scoring": True,
+            "scoring_model_id": "qwen-plus",
+        },
+    )
+    captured = {}
+
+    class FakeScoringService:
+        def __init__(self):
+            self._default_retry_delays = (5.0, 15.0, 30.0)
+            self._config = {"dimensions": scoring_router.DIMENSIONS}
+
+        def is_available(self, model_id=None):
+            return True
+
+        def get_last_error(self):
+            return ""
+
+        def resolve_scoring_thinking_effort(self, *args, **kwargs):
+            return "disabled"
+
+        def _sanitize_error_message(self, message: str):
+            return str(message)
+
+    async def fake_score_turn(service, payload, **kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "scores": {dimension: 5 for dimension in scoring_router.DIMENSIONS},
+            "weighted_total": 30,
+            "mapped_total": 90,
+            "reasoning": "评分成功",
+            "reasoning_content": "",
+            "error": "",
+            "model_id": "qwen-plus",
+            "score_status": "scored",
+        }
+
+    monkeypatch.setenv("SCORING_REQUEST_TIMEOUT_S", "120")
+    monkeypatch.delenv(scoring_router.LIVE_SCORING_TIMEOUT_ENV, raising=False)
+    monkeypatch.setattr(scoring_router, "_get_scoring", lambda: FakeScoringService())
+    monkeypatch.setattr(scoring_router, "invoke_score_turn_compat", fake_score_turn)
+
+    asyncio.run(scoring_router._run_live_scoring_turn(conv_id, 1, config=config))
+
+    assert_true(captured.get("timeout_s") == 120.0, f"live scoring 未继承全局 timeout: {captured}")
+
+
+def test_live_scoring_retry_count_zero_means_single_attempt(monkeypatch):
+    conv_id, config = create_unscored_conversation(
+        "live 不重试会话",
+        turn_count=1,
+        runtime={
+            "auto_scoring": True,
+            "scoring_model_id": "qwen-plus",
+            "scoring_retry_count": 0,
+        },
+    )
+    attempts = []
+    delays = []
+
+    class FakeScoringService:
+        def __init__(self):
+            self._default_retry_delays = (5.0, 15.0, 30.0)
+            self._config = {"dimensions": scoring_router.DIMENSIONS}
+
+        def is_available(self, model_id=None):
+            return True
+
+        def get_last_error(self):
+            return ""
+
+        def resolve_scoring_thinking_effort(self, *args, **kwargs):
+            return "disabled"
+
+        def _sanitize_error_message(self, message: str):
+            return str(message)
+
+    async def always_fail(*args, **kwargs):
+        attempts.append(kwargs)
+        raise RuntimeError("retry disabled")
+
+    async def fake_sleep(ctrl, delay_s):
+        delays.append(delay_s)
+
+    monkeypatch.setattr(scoring_router, "_get_scoring", lambda: FakeScoringService())
+    monkeypatch.setattr(scoring_router, "invoke_score_turn_compat", always_fail)
+    monkeypatch.setattr(scoring_router, "_sleep_with_control", fake_sleep)
+
+    asyncio.run(scoring_router._run_live_scoring_turn(conv_id, 1, config=config))
+
+    latest = db.get_conversation(conv_id)
+    target = next((item for item in latest.get("results", []) if item.get("turn") == 1), None)
+    assert_true(len(attempts) == 1, f"scoring_retry_count=0 应只尝试一次: {len(attempts)}")
+    assert_true(delays == [], f"scoring_retry_count=0 不应进入退避等待: {delays}")
+    assert_true(target and target.get("score_status") == "failed", f"最终失败应保留手动重试入口: {target}")
 
 
 def test_push_score_message_tolerates_racy_socket_registry():

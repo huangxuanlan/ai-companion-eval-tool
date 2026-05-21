@@ -85,3 +85,14 @@ class ConversationStore:
             role_name=role_name,
             exclude_conv_id=exclude_conv_id,
         )
+
+    def get_latest_dialogue_summary(
+        self,
+        *,
+        role_name: str = "",
+        exclude_conv_id: str = "",
+    ) -> str:
+        return db.get_latest_dialogue_summary(
+            role_name=role_name,
+            exclude_conv_id=exclude_conv_id,
+        )

@@ -288,7 +288,7 @@ def test_scoring_defaults_controls_expose_save_feedback():
     js_source = js_path.read_text(encoding="utf-8")
     html_source = html_path.read_text(encoding="utf-8")
 
-    assert "const DEFAULT_SCORING_CONCURRENCY = 24;" in js_source
+    assert "const DEFAULT_SCORING_CONCURRENCY = 2;" in js_source
     assert "const DEFAULT_SCORING_THINKING_ENABLED = true;" in js_source
     assert "function saveScoringDefaults()" in js_source
     assert "function resetScoringDefaults()" in js_source
@@ -296,7 +296,8 @@ def test_scoring_defaults_controls_expose_save_feedback():
     assert 'id="tc-scoring-save-defaults"' in html_source
     assert 'id="tc-scoring-reset-defaults"' in html_source
     assert 'id="tc-scoring-default-status"' in html_source
-    assert 'id="tc-scoring-concurrency-display"' in html_source and ">24<" in html_source
+    assert 'id="tc-scoring-concurrency-display"' in html_source and ">2<" in html_source
+    assert "并发 2 / 重试 3 次" in html_source
 
 
 def test_compare_models_expose_per_model_thinking_controls():
@@ -316,22 +317,21 @@ def test_compare_models_expose_per_model_thinking_controls():
     assert "思考全关" in html_source
     assert "思考高" in html_source
     assert "思考Max" in html_source
-    assert "legacy_bundle.js?v=96" in html_source
+    assert "legacy_bundle.js?v=97" in html_source
 
 
-def test_prompt_ab_batch_caps_auto_scoring_concurrency():
+def test_prompt_ab_batch_respects_configured_auto_scoring_concurrency():
     js_path = SERVER_DIR / "static" / "js" / "legacy_bundle.js"
     source = js_path.read_text(encoding="utf-8")
 
-    assert "const DEFAULT_AB_BATCH_SCORING_CONCURRENCY = 2;" in source
     marker = "function buildABBatchBranchItem"
     start = source.index(marker)
     end = source.index("function buildABBatchOrchestrationPayload", start)
     body = source[start:end]
 
     assert "payload.auto_scoring = !dryRun;" in body
-    assert "payload.scoring_max_workers = Math.min(" in body
-    assert "DEFAULT_AB_BATCH_SCORING_CONCURRENCY" in body
+    assert "payload.scoring_max_workers = normalizeScoringConcurrency(payload.scoring_max_workers);" in body
+    assert "DEFAULT_AB_BATCH_SCORING_CONCURRENCY" not in source
 
 
 def test_interactive_and_batch_match_for_ten_turns(tmp_path: Path):

@@ -81,7 +81,7 @@ def _build_builtin_config(preset_id: str) -> dict:
         },
         "runtime": {
             "model_ids": [DEFAULT_PRIMARY_MODEL],
-            "summary_interval": 10,
+            "summary_interval": 5,
             "injection_depth": 4,
         },
     }

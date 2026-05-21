@@ -56,7 +56,8 @@ DIMENSION_DISPLAY = {
     "context_coherence": "上下文衔接度",
 }
 LIVE_SCORING_TIMEOUT_ENV = "SCORING_LIVE_REQUEST_TIMEOUT_S"
-LIVE_SCORING_DEFAULT_TIMEOUT_S = 25.0
+SCORING_REQUEST_TIMEOUT_ENV = "SCORING_REQUEST_TIMEOUT_S"
+LIVE_SCORING_DEFAULT_TIMEOUT_S = 120.0
 LIVE_SCORING_MAX_WORKERS_ENV = "SCORING_LIVE_MAX_WORKERS"
 LIVE_SCORING_DEFAULT_MAX_WORKERS = 6
 
@@ -432,6 +433,14 @@ def _build_scoring_action_state(
         recommended_action = "resume_sync"
         recommended_action_label = "继续同步"
         recommended_action_detail = "后台处理中，继续同步结果"
+    elif failed_count > 0 and scored_count > 0:
+        recommended_action = "retry_failed_turns"
+        recommended_action_label = "重试失败项"
+        recommended_action_detail = "仅重试失败轮次，保留已成功评分"
+    elif failed_count > 0:
+        recommended_action = "rescore_all"
+        recommended_action_label = "重新全部打分"
+        recommended_action_detail = "当前没有可用评分结果，整段重打"
     elif repair_summary_needed:
         recommended_action = "repair_summary"
         recommended_action_label = "汇总评分"
@@ -452,10 +461,6 @@ def _build_scoring_action_state(
         recommended_action = "view_results"
         recommended_action_label = "查看结果"
         recommended_action_detail = "当前评分结果已可查看"
-    elif failed_count > 0:
-        recommended_action = "rescore_all"
-        recommended_action_label = "重新全部打分"
-        recommended_action_detail = "当前没有可用评分结果，整段重打"
     else:
         recommended_action = "start_scoring"
         recommended_action_label = "开始打分"
@@ -688,8 +693,11 @@ def _resolve_retry_schedule(service: ScoringService) -> tuple[float, ...]:
 
 def _resolve_retry_count(config: dict) -> int:
     runtime = dict(config.get("runtime", {}) or {})
+    raw = runtime.get("scoring_retry_count", None)
+    if raw is None:
+        return 3
     try:
-        return max(1, int(runtime.get("scoring_retry_count", 3) or 3))
+        return max(1, min(int(raw), 10))
     except (TypeError, ValueError):
         return 3
 
@@ -705,12 +713,18 @@ def _resolve_live_scoring_timeout(config: dict) -> float:
     runtime = dict((config or {}).get("runtime", {}) or {})
     raw = runtime.get(
         "live_scoring_timeout_s",
-        os.environ.get(LIVE_SCORING_TIMEOUT_ENV, str(LIVE_SCORING_DEFAULT_TIMEOUT_S)),
+        os.environ.get(
+            LIVE_SCORING_TIMEOUT_ENV,
+            os.environ.get(SCORING_REQUEST_TIMEOUT_ENV, str(LIVE_SCORING_DEFAULT_TIMEOUT_S)),
+        ),
     )
     try:
         return max(1.0, float(raw))
     except (TypeError, ValueError):
-        return LIVE_SCORING_DEFAULT_TIMEOUT_S
+        try:
+            return max(1.0, float(os.environ.get(SCORING_REQUEST_TIMEOUT_ENV, LIVE_SCORING_DEFAULT_TIMEOUT_S)))
+        except (TypeError, ValueError):
+            return LIVE_SCORING_DEFAULT_TIMEOUT_S
 
 
 async def _push_live_score_event(

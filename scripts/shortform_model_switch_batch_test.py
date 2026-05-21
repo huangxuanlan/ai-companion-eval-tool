@@ -4,7 +4,7 @@
 
 核心口径：
 - 候选主生成模型按 2 角色 x 3 关系阶段 x 20 轮执行。
-- 6 个基线组用于给候选评分提供 baseline 输出。
+- 默认包含基线组用于给候选评分提供 baseline 输出，也支持候选-only 生成。
 - 组内串行，组间用 asyncio.Semaphore 控制并发。
 - API Key 仅从环境变量读取，不写入输出。
 """
@@ -774,7 +774,7 @@ async def run_group(
 def build_groups(
     roles: list[RoleCase],
     messages_by_relationship: dict[str, list[str]],
-    baseline: ModelSpec,
+    baseline: ModelSpec | None,
     candidates: list[ModelSpec],
     turn_count: int,
 ) -> list[GroupSpec]:
@@ -788,16 +788,17 @@ def build_groups(
         )
         for relationship in relationships:
             turns = normalize_turns(messages_by_relationship[relationship], turn_count)
-            groups.append(
-                GroupSpec(
-                    group_id=f"baseline::{role.role_type}::{relationship}",
-                    model=baseline,
-                    role=role,
-                    relationship=relationship,
-                    turns=turns,
-                    is_baseline=True,
+            if baseline is not None:
+                groups.append(
+                    GroupSpec(
+                        group_id=f"baseline::{role.role_type}::{relationship}",
+                        model=baseline,
+                        role=role,
+                        relationship=relationship,
+                        turns=turns,
+                        is_baseline=True,
+                    )
                 )
-            )
             for candidate in candidates:
                 groups.append(
                     GroupSpec(
@@ -1046,6 +1047,8 @@ async def async_main(args: argparse.Namespace) -> Path:
         assistant_seed,
     ) = load_cases(config)
     baseline, candidates, scorer = load_specs(config)
+    if getattr(args, "skip_baseline", False):
+        baseline = None
     groups = build_groups(
         roles=roles,
         messages_by_relationship=messages_by_relationship,
@@ -1107,12 +1110,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="只校验拼接和输出，不调用模型",
     )
+    parser.add_argument(
+        "--skip-baseline",
+        action="store_true",
+        help="只生成候选模型结果；需配合 --no-score 使用",
+    )
     parser.add_argument("--no-score", action="store_true", help="跳过评分")
     return parser.parse_args()
 
 
 def main() -> None:
-    output_path = asyncio.run(async_main(parse_args()))
+    args = parse_args()
+    if args.skip_baseline and not args.no_score:
+        raise SystemExit("--skip-baseline 需要配合 --no-score 使用")
+    output_path = asyncio.run(async_main(args))
     print(f"[OK] Excel 已输出: {output_path}")
 
 

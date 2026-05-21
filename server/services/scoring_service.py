@@ -435,26 +435,40 @@ class ScoringService:
         return ""
 
     def _resolve_scoring_api_keys(self, model_id: str | None = None) -> list[str]:
-        """Resolve multi-key pool from SCORING_API_KEYS env (comma separated)."""
+        """Resolve the scoring API key pool, preserving priority and de-duplicating."""
         provider = self._resolve_scoring_provider(model_id)
         model_cfg = self._get_model_config(model_id)
         api = dict(model_cfg.get("api", {}) or {})
         env_candidates: list[str] = []
 
         if provider in {"google", "google_gemini", "gemini"}:
-            env_candidates.extend(["SCORING_API_KEYS", "GOOGLE_API_KEYS"])
+            env_candidates.extend(
+                [
+                    "SCORING_API_KEYS",
+                    "SCORING_API_KEY",
+                    "GOOGLE_API_KEYS",
+                    "GOOGLE_API_KEY",
+                ]
+            )
         else:
             api_key_env = str(api.get("api_key_env", "") or "").strip()
             if not api_key_env:
                 api_key_env = self._extract_env_name(api.get("api_key", ""))
             if api_key_env.endswith("_API_KEY"):
-                env_candidates.append(f"{api_key_env[:-8]}API_KEYS")
+                # 例：VOLCENGINE_API_KEY -> VOLCENGINE_API_KEYS（保留下划线分隔）
+                env_candidates.append(f"{api_key_env}S")
 
+        resolved: list[str] = []
+        seen: set[str] = set()
         for env_name in env_candidates:
             raw = str(os.environ.get(env_name, "") or "").strip()
-            keys = [key.strip() for key in raw.split(",") if key.strip()]
-            if keys:
-                return keys
+            for key in (item.strip() for item in raw.split(",")):
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                resolved.append(key)
+        if resolved:
+            return resolved
 
         single = self._resolve_scoring_api_key(model_id)
         return [single] if single else []

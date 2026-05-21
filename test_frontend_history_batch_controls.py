@@ -32,6 +32,35 @@ def test_history_table_removes_source_column_and_uses_single_line_actions():
     assert 'title="${retryScoringTitle}"' in history_body
 
 
+def test_ai_output_display_mode_defaults_to_raw_and_persists_globally():
+    html = HTML_PATH.read_text(encoding="utf-8")
+    source = JS_PATH.read_text(encoding="utf-8")
+    css = CSS_PATH.read_text(encoding="utf-8")
+
+    assert 'id="btn-ai-output-display-mode"' in html
+    assert "const AI_OUTPUT_DISPLAY_STORAGE_KEY = 'longformAiOutputDisplayMode';" in source
+    assert "const AI_OUTPUT_DISPLAY_DEFAULT = 'raw';" in source
+    assert "aiOutputDisplayMode: getAiOutputDisplayMode()" in source
+    assert "localStorage.setItem(AI_OUTPUT_DISPLAY_STORAGE_KEY, mode)" in source
+    assert "function toggleAiOutputDisplayMode()" in source
+    assert ".ai-output-text" in css
+    assert "white-space: pre-wrap" in css
+
+
+def test_ai_output_raw_rendering_preserves_text_without_br_conversion():
+    source = JS_PATH.read_text(encoding="utf-8")
+    render_body = _slice(source, "function renderAiOutput(text", "function renderAiOutputBlock")
+    block_body = _slice(source, "function renderAiOutputBlock(text", "function refreshAiOutputDisplayNodes")
+
+    assert "displayMode === 'formatted'" in render_body
+    assert "return formatNarration(source);" in render_body
+    assert "return escapeHtml(source);" in render_body
+    assert "data-ai-output" in block_body
+    assert "formatNarration ? formatNarration(aiOutput)" not in source
+    assert "const formatted = formatNarration(aiReply);" not in source
+    assert "contentEl.innerHTML = formatNarration(side.latestReply)" not in source
+
+
 def test_history_table_treats_zero_score_as_valid_average():
     js = JS_PATH.read_text(encoding="utf-8")
     history_body = _slice(js, "function renderHistory(convs)", "function applyHistoryFilters()")
@@ -196,6 +225,20 @@ def test_history_actions_include_archive_and_event_log():
     assert "日志" in history_body
 
 
+def test_sidebar_history_marks_current_conversation_visibly():
+    source = JS_PATH.read_text(encoding="utf-8")
+    css = CSS_PATH.read_text(encoding="utf-8")
+    sidebar_body = _slice(source, "function renderSidebarHistory(convs)", "function syncHistoryCompareSelection()")
+
+    assert "const isActive = String(state.convId || '') === String(convId || '');" in sidebar_body
+    assert "history-item${isActive ? ' active' : ''}" in sidebar_body
+    assert "aria-current" in sidebar_body
+    assert "history-current-badge" in sidebar_body
+    assert ".history-item.active" in css
+    assert ".history-current-badge" in css
+    assert ".sidebar.collapsed .history-item.active .history-avatar" in css
+
+
 def test_scoring_modal_has_low_score_threshold_and_log_actions():
     html = HTML_PATH.read_text(encoding="utf-8")
     source = JS_PATH.read_text(encoding="utf-8")
@@ -329,6 +372,26 @@ def test_history_bulk_actions_use_confirm_modal_and_regenerate_summaries():
     assert "确认生成历史对比分析" in compare_body
 
 
+def test_test_center_rows_retry_failed_scores_and_refresh_run_state():
+    source = JS_PATH.read_text(encoding="utf-8")
+    row_body = _slice(source, "function applyBatchRunItemToRow(row, item", "function applyBatchOrchestrationRun(run)")
+    trigger_body = _slice(source, "async function triggerConversationScoringFromBatch(convId, btnEl)", "const SCORING_SUMMARY_DIMENSIONS")
+    retry_body = _slice(source, "async function retryFailedScoringItems()", "async function refreshCurrentBatchRunState()")
+
+    assert "const failedTurns = Number(item.failed_turns || 0);" in row_body
+    assert "pendingScoringTurns > 0" in row_body
+    assert "const label = failedTurns > 0 ? '重试失败项' : '同步评分';" in row_body
+    assert "triggerConversationScoringFromBatch('${convId}', this)" in row_body
+    assert "const actionMeta = getConversationScoringActionMeta(current);" in trigger_body
+    assert "runConversationScoringAction(id, actionMeta.action" in trigger_body
+    assert "watchConversationScoreRefresh(id, { allowDelayed: true })" in trigger_body
+    assert "await refreshCurrentBatchRunState();" in trigger_body
+    assert "async function refreshCurrentBatchRunState()" in source
+    assert "fetchOrchestrationRun(runId)" in source
+    assert "applyBatchOrchestrationRun(run)" in source
+    assert "await refreshCurrentBatchRunState();" in retry_body
+
+
 def test_history_summary_toolbar_supports_export_progress_and_ai_summary_generation():
     html = HTML_PATH.read_text(encoding="utf-8")
     source = JS_PATH.read_text(encoding="utf-8")
@@ -432,7 +495,7 @@ def test_orchestration_notice_renders_retry_entry_and_cache_busted_bundle():
     assert 'id="orchestration-env-notice"' in html
     assert "onclick=\"retryOrchestrationEnvironmentProbe()\"" in source
     assert "function renderOrchestrationEnvironmentNotice()" in source
-    assert 'legacy_bundle.js?v=95' in html
+    assert 'legacy_bundle.js?v=97' in html
 
 
 def test_prompt_ab_batch_mode_reuses_excel_and_orchestration_controls():

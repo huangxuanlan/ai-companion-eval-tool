@@ -198,6 +198,19 @@ def _get_latest_conversation_channel(
     )
 
 
+def _get_latest_dialogue_summary(
+    *,
+    role_name: str = "",
+    exclude_conv_id: str = "",
+) -> str:
+    return _call_conv_service(
+        "get_latest_dialogue_summary",
+        db.get_latest_dialogue_summary,
+        role_name=role_name,
+        exclude_conv_id=exclude_conv_id,
+    )
+
+
 def _get_visible_conversation_or_404(conv_id: str) -> dict:
     return ensure_visible_conversation(_load_conversation(conv_id), conv_id)
 
@@ -514,6 +527,43 @@ def _apply_conversation_channel_context(
             exclude_conv_id=exclude_conv_id,
         )
         context["last_cst_type"] = _format_last_conversation_type(previous_channel)
+
+
+def _load_previous_dialogue_summary(config: dict, *, exclude_conv_id: str = "") -> str:
+    if is_public_demo_mode():
+        return ""
+    role_name = str(dict(config.get("character", {}) or {}).get("Role_Nickname", "")).strip()
+    return _get_latest_dialogue_summary(
+        role_name=role_name,
+        exclude_conv_id=exclude_conv_id,
+    )
+
+
+def _apply_seed_dialogue_summary(config: dict, summary: str) -> None:
+    seed_summary = str(summary or "").strip()
+    if not seed_summary:
+        return
+    config["dialogue_summary"] = seed_summary
+    runtime = config.setdefault("runtime", {})
+    runtime["latest_dialogue_summary"] = seed_summary
+    runtime["last_summary_turn"] = 0
+    runtime["summary_job_status"] = "completed"
+    runtime["summary_job_target_turn"] = 0
+
+
+def _apply_seed_switch_state(config: dict) -> None:
+    custom_variables = config.setdefault("custom_variables", {})
+    switch_state = str(
+        custom_variables.pop("switch_state", "")
+        or custom_variables.pop("mode_switch_state", "")
+        or ""
+    ).strip()
+    if not switch_state:
+        return
+    runtime = config.setdefault("runtime", {})
+    runtime["switch_state"] = switch_state
+    runtime["switch_state_status"] = "pending"
+    runtime["switch_state_target_turn"] = 1
 
 
 def _normalize_runtime_turns(turns: list[str] | None) -> list[str]:
@@ -877,12 +927,25 @@ async def create_interactive_conversation(data: InteractiveConversationCreate):
         runtime["ab_session_id"] = str(data.ab_session_id).strip()
     if data.ab_variant:
         runtime["ab_variant"] = str(data.ab_variant).strip()
+    previous_summary = _load_previous_dialogue_summary(config)
+    _apply_seed_dialogue_summary(config, previous_summary)
+    _apply_seed_switch_state(config)
     conv_id = _create_conversation_record(
         model_id=data.model_id,
         config=config,
         model_mini=model_mini,
         prompt_version=requested_prompt,
     )
+    if not previous_summary:
+        service = _get_conv_service()
+        schedule_initial = getattr(service, "schedule_initial_summary_job", None)
+        if callable(schedule_initial):
+            schedule_initial(
+                conv_id=conv_id,
+                config=config,
+                model_mini=model_mini,
+                dry_run=bool(data.dry_run),
+            )
     _update_conversation_status(conv_id, "running")
     return {"id": conv_id, "status": "running"}
 

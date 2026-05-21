@@ -639,6 +639,23 @@ def test_runtime_bundle_and_request_snapshot_preserve_custom_variables(tmp_path:
     assert snapshot["custom_variables"]["monthly_schedule"] == "本月最后一周要去深圳出差"
 
 
+def test_request_payload_snapshot_exposes_few_shot_debug_metadata():
+    service = _build_service()
+    config_data = _build_runtime_config(service, "xiaoJingYan")
+    runtime_bundle = service._prepare_runtime_bundle(config_data)
+
+    snapshot = service._build_request_payload_snapshot(
+        config_data,
+        runtime_bundle,
+        messages=[{"role": "system", "content": "包含写作风格示例开始"}],
+        model_id="dry-run-pro",
+    )
+
+    assert snapshot["few_shot_file"]
+    assert snapshot["few_shot_message_count"] == len(runtime_bundle.few_shot_messages)
+    assert snapshot["few_shot_messages"] == runtime_bundle.few_shot_messages
+
+
 def test_turn1_runtime_contract_skips_few_shot_and_keeps_sentinel(isolated_db: Path):
     conversation_service_module, _ = _import_runtime_modules()
     service = _build_service()

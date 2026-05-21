@@ -104,7 +104,7 @@ MAX_TOKENS = int(os.environ.get("DOUBAO_MAX_TOKENS", "4096"))
 TOP_P = float(os.environ.get("DOUBAO_TOP_P", "0.95"))
 
 # 摘要生成间隔（每 N 轮生成一次 dialogue_summary）
-SUMMARY_INTERVAL = 10
+SUMMARY_INTERVAL = 5
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 try:

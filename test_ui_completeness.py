@@ -269,7 +269,7 @@ async def main():
 
             summary_interval = await page.locator("#f-summary-interval").input_value()
             injection_depth = await page.locator("#f-injection-depth").input_value()
-            record(results, "C01 默认摘要间隔为 10", summary_interval == "10", f"value={summary_interval}")
+            record(results, "C01 默认摘要间隔为 5", summary_interval == "5", f"value={summary_interval}")
             record(results, "C02 默认注入深度为 4", injection_depth == "4", f"value={injection_depth}")
 
             await page.locator("#rightPanel .panel-tab").filter(has_text="⚙️ 参数").click()

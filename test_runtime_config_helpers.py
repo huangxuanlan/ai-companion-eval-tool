@@ -99,7 +99,7 @@ def test_apply_runtime_defaults_sets_prompt_and_runtime_fields():
     )
 
     assert config["prompt_file"] == "星朋友长文模式_提示词_v2.4_20260325.md"
-    assert config["runtime"]["summary_interval"] == 10
+    assert config["runtime"]["summary_interval"] == 5
     assert config["runtime"]["injection_depth"] == 4
     assert config["runtime"]["model_ids"] == ["doubao-pro"]
     assert config["runtime"]["temperature"] == 0.8

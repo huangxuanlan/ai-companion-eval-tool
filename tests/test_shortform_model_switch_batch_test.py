@@ -48,6 +48,7 @@ def test_dry_run_writes_excel_with_one_row_per_turn(tmp_path):
         retries=3,
         retry_delay=0.0,
         dry_run=True,
+        skip_baseline=False,
         no_score=False,
     )
 
@@ -116,3 +117,46 @@ def test_load_excel_cases_maps_transposed_variable_table(tmp_path):
     groups = shortform.build_groups(roles, user_messages, baseline, candidates, 2)
     assert {group.relationship for group in groups} == {"暧昧"}
     assert len(groups) == 2
+
+
+def test_build_groups_supports_candidate_only_generation(tmp_path):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet1"
+    rows = [
+        ["变量代码", "角色1"],
+        ["@全局用户参数_完整时间信息&", "现在时间是2026-05-07 10时 上午"],
+        ["@全局用户参数_voice_forbidden&", "/"],
+        ["@全局用户参数_last_cst_type&", "你与用户上一次在文字聊天沟通"],
+        ["@全局用户参数_relationship&", "暧昧"],
+        ["@全局用户参数_relation_info&", "朋友，并且在暧昧期"],
+        ["@全局用户参数_Role_Nickname&", "肖战"],
+        ["@全局用户参数_age&", "28"],
+        ["@全局用户参数_occupation&", "歌手"],
+        ["@全局用户参数_weekly_schedul&", "/"],
+        ["@全局用户参数_monthly_schedul&", "本月拍摄和宣传"],
+        ["@全局用户参数_background&", "演员背景"],
+        ["@全局用户参数_personality&", "温暖陪伴"],
+        ["@全局用户参数_speaking_style&", "自然口语"],
+        ["@全局用户参数_user_Nickname&", "琴琴"],
+        ["@全局用户参数_call_name&", "/"],
+        [
+            "@全局用户参数_dialogueStartPrompt&",
+            "<dialogue_history>无</dialogue_history>",
+        ],
+        ["@全局用户参数_system_module3&", "表达风格"],
+        ["@全局用户参数_system_module11&", "暧昧阶段规则"],
+        ["短文对话示例", "用户\n在忙吗\n\nAI\n（看着你）在\n\n用户\n想你"],
+    ]
+    for row in rows:
+        sheet.append(row)
+    path = tmp_path / "cases.xlsx"
+    workbook.save(path)
+
+    roles, user_messages = shortform.load_excel_cases(path)
+    candidates = [shortform.ModelSpec.from_dict(shortform.DEFAULT_CANDIDATES[0])]
+
+    groups = shortform.build_groups(roles, user_messages, None, candidates, 2)
+
+    assert len(groups) == 1
+    assert groups[0].is_baseline is False

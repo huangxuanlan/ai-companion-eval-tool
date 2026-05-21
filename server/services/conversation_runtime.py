@@ -78,6 +78,12 @@ def resolve_dialogue_summary_for_next_turn(
     seed_summary = str(runtime_bundle.seed_dialogue_summary or "").strip()
     completed_turns = len(results or [])
 
+    if (
+        completed_turns <= 0
+        and latest_summary
+        and str(runtime.get("summary_job_status", "")).strip() == "completed"
+    ):
+        return latest_summary, "completed"
     if completed_turns <= 0:
         return seed_summary, "seed" if seed_summary else "empty"
     if latest_summary and last_summary_turn > 0:
@@ -314,6 +320,49 @@ def schedule_summary_job_if_needed(
         status="pending",
         target_turn=turn_num,
     )
+
+
+def schedule_initial_summary_job(
+    service,
+    *,
+    conv_id: str,
+    config: dict,
+    runtime_bundle,
+    model_mini: str,
+    summary_prompt_version: str,
+    dry_run: bool,
+) -> None:
+    key = (conv_id, 0)
+    with service._job_lock:
+        existing = service._summary_jobs.get(key)
+        if existing and not existing.get("consumed"):
+            return
+
+    future = service._background_executor.submit(
+        service.generate_summary,
+        [],
+        runtime_bundle.role_name,
+        runtime_bundle.personal_type,
+        runtime_bundle.relationship,
+        model_mini,
+        summary_prompt_version,
+        dry_run,
+    )
+    with service._job_lock:
+        service._summary_jobs[key] = {
+            "future": future,
+            "config": config,
+            "consumed": False,
+        }
+    set_summary_runtime_state(
+        service,
+        conv_id,
+        config,
+        status="pending",
+        target_turn=0,
+    )
+    future.add_done_callback(lambda _: consume_summary_job(service, conv_id, 0))
+    logger.info("会话创建摘要预热任务已调度 conv_id=%s", conv_id)
 
 
 def schedule_profile_job_if_needed(

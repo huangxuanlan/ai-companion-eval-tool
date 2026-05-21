@@ -49,6 +49,13 @@ def build_request_payload_snapshot(
         effective_max_tokens = parameters.get("max_completion_tokens")
 
     effective_thinking_effort = str(thinking_effort or "").strip().lower() or "disabled"
+    modules = dict(config.get("modules", {}) or {})
+    few_shot_messages = list(getattr(runtime_bundle, "few_shot_messages", []) or [])
+    few_shot_file = str(
+        config.get("few_shot_file")
+        or modules.get("longform_few_shot")
+        or ""
+    ).strip()
     return {
         "model_id": model_id,
         "messages": [dict(item) for item in (messages or [])],
@@ -83,6 +90,9 @@ def build_request_payload_snapshot(
         "role_name": runtime_bundle.role_name,
         "relationship": runtime_bundle.relationship,
         "personality": runtime_bundle.personality,
+        "few_shot_file": few_shot_file,
+        "few_shot_message_count": len(few_shot_messages),
+        "few_shot_messages": [dict(item) for item in few_shot_messages],
         "system_prompt": runtime_bundle.rendered_system,
         "system_after": runtime_bundle.rendered_after,
         "memory_context_snapshot": dict(memory_context_snapshot or {}),
@@ -103,12 +113,14 @@ def build_memory_context_block(
     profile: str,
     moments: str,
     dialogue_summary: str,
+    switch_state: str = "",
 ) -> tuple[str, dict]:
     sections: list[str] = []
     snapshot = {
         "dialogueStartPrompt": str(profile or "").strip(),
         "moments": str(moments or "").strip(),
         "dialogue_summary": str(dialogue_summary or "").strip(),
+        "switch_state": str(switch_state or "").strip(),
     }
     if snapshot["dialogueStartPrompt"]:
         sections.append(f"【长期记忆用户画像】\n{snapshot['dialogueStartPrompt']}")
@@ -116,6 +128,8 @@ def build_memory_context_block(
         sections.append(f"【朋友圈记忆】\n{snapshot['moments']}")
     if snapshot["dialogue_summary"]:
         sections.append(f"【历史对话摘要】\n{snapshot['dialogue_summary']}")
+    if snapshot["switch_state"]:
+        sections.append(f"【切换接话状态】\n{snapshot['switch_state']}")
     return "\n\n".join(sections), snapshot
 
 
@@ -136,6 +150,7 @@ def execute_single_turn(
     thinking_effort: str = "disabled",
     temperature: float | None = None,
     top_p: float | None = None,
+    switch_state: str = "",
 ) -> dict:
     config = config or {}
     runtime = dict(config.get("runtime", {}) or {})
@@ -182,11 +197,13 @@ def execute_single_turn(
         runtime_bundle.memory_profile,
         runtime_bundle.memory_moments,
         dialogue_summary,
+        switch_state,
     )
     use_raw_seed_summary = (
         effective_summary_source == "seed"
         and not str(runtime_bundle.memory_profile or "").strip()
         and not str(runtime_bundle.memory_moments or "").strip()
+        and not str(switch_state or "").strip()
     )
     if use_raw_seed_summary:
         memory_context = ""
@@ -231,6 +248,7 @@ def execute_single_turn(
             runtime_bundle.memory_profile,
             runtime_bundle.memory_moments,
             dialogue_summary,
+            switch_state,
         )
         if use_raw_seed_summary:
             memory_context = ""

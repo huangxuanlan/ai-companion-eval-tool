@@ -75,6 +75,37 @@ def get_latest_conversation_channel(role_name: str = "", exclude_conv_id: str = 
     return ""
 
 
+def get_latest_dialogue_summary(role_name: str = "", exclude_conv_id: str = "") -> str:
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT c.id, c.config_json, t.dialogue_summary
+        FROM conversations c
+        JOIN turn_results t ON t.conversation_id = c.id
+        WHERE TRIM(COALESCE(t.dialogue_summary, '')) != ''
+          AND c.archived_at IS NULL
+        ORDER BY datetime(COALESCE(c.updated_at, c.created_at)) DESC, t.turn DESC
+        """
+    ).fetchall()
+    conn.close()
+
+    target_role = str(role_name or "").strip()
+    excluded = str(exclude_conv_id or "").strip()
+    for row in rows:
+        if excluded and row["id"] == excluded:
+            continue
+        config = json.loads(row["config_json"] or "{}")
+        current_role = str(
+            dict(config.get("character", {}) or {}).get("Role_Nickname", "")
+        ).strip()
+        if target_role and current_role != target_role:
+            continue
+        summary = str(row["dialogue_summary"] or "").strip()
+        if summary:
+            return summary
+    return ""
+
+
 def get_connection() -> sqlite3.Connection:
     """获取 SQLite 连接（开启 WAL 模式 + 外键约束）"""
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)

@@ -232,6 +232,17 @@ body {
   color: var(--text-primary)
 }
 
+.history-item.active {
+  background: rgba(22, 100, 255, .08);
+  border-left-color: var(--primary-color);
+  box-shadow: inset 0 0 0 1px rgba(22, 100, 255, .16);
+  color: var(--text-primary)
+}
+
+.history-item.active:hover {
+  background: rgba(22, 100, 255, .11)
+}
+
 .history-item[data-status="completed"] {
   border-left-color: #34d399
 }
@@ -246,6 +257,10 @@ body {
 
 .history-item[data-status="error"] {
   border-left-color: #f87171
+}
+
+.history-item.active[data-status] {
+  border-left-color: var(--primary-color)
 }
 
 .history-item.pinned .history-title::before {
@@ -283,6 +298,25 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.4
+}
+
+.history-item.active .history-title {
+  color: var(--primary-color)
+}
+
+.history-current-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: rgba(22, 100, 255, .12);
+  color: var(--primary-color);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap
 }
 
 .history-preview {
@@ -370,6 +404,17 @@ body {
   justify-content: center;
   font-size: 12px;
   font-weight: 700
+}
+
+.sidebar.collapsed .history-item.active {
+  background: transparent;
+  box-shadow: none
+}
+
+.sidebar.collapsed .history-item.active .history-avatar {
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(22, 100, 255, .16)
 }
 
 /* Workspace */
@@ -745,6 +790,31 @@ body {
 .msg-dialogue {
   color: var(--text-primary);
   font-weight: 700;
+}
+
+.ai-output-toggle {
+  min-width: 48px;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.ai-output-toggle[data-mode="raw"] {
+  color: var(--primary-color);
+  border-color: rgba(22, 100, 255, 0.24);
+  background: rgba(22, 100, 255, 0.08);
+}
+
+.ai-output-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-output-raw {
+  font-family: inherit;
+}
+
+.ai-output-formatted {
+  white-space: normal;
 }
 
 .msg-meta {

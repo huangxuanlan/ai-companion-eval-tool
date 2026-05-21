@@ -95,7 +95,7 @@ async def main():
             injection_depth = await page.locator("#f-injection-depth").input_value()
             if not voice_forbidden.strip():
                 raise AssertionError("voice_forbidden 未默认填充")
-            if summary_interval != "10":
+            if summary_interval != "5":
                 raise AssertionError(f"默认摘要间隔未对齐 v5.5: {summary_interval}")
             if injection_depth != "4":
                 raise AssertionError(f"默认注入深度未对齐 v5.5: {injection_depth}")

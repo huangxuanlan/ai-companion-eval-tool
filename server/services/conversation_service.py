@@ -178,6 +178,17 @@ class ConversationService:
             exclude_conv_id=exclude_conv_id,
         )
 
+    def get_latest_dialogue_summary(
+        self,
+        *,
+        role_name: str = "",
+        exclude_conv_id: str = "",
+    ) -> str:
+        return self.store.get_latest_dialogue_summary(
+            role_name=role_name,
+            exclude_conv_id=exclude_conv_id,
+        )
+
     @staticmethod
     def _normalize_injection_depth(injection_depth: int | str | None) -> int:
         """兼容旧三档字符串和新数值枚举，统一返回尾部倒数插入位置。"""
@@ -363,11 +374,13 @@ class ConversationService:
         profile: str,
         moments: str,
         dialogue_summary: str,
+        switch_state: str = "",
     ) -> tuple[str, dict]:
         return conversation_generation.build_memory_context_block(
             profile,
             moments,
             dialogue_summary,
+            switch_state,
         )
 
     def _refresh_runtime_bundle_memory(
@@ -488,6 +501,28 @@ class ConversationService:
             dry_run=dry_run,
         )
 
+    def schedule_initial_summary_job(
+        self,
+        *,
+        conv_id: str,
+        config: dict,
+        model_mini: str,
+        dry_run: bool = False,
+    ) -> None:
+        runtime_bundle = self._prepare_runtime_bundle(config)
+        summary_prompt_version = str(
+            config.get("runtime", {}).get("summary_prompt_version", "")
+        ).strip()
+        conversation_runtime.schedule_initial_summary_job(
+            self,
+            conv_id=conv_id,
+            config=config,
+            runtime_bundle=runtime_bundle,
+            model_mini=model_mini,
+            summary_prompt_version=summary_prompt_version,
+            dry_run=dry_run,
+        )
+
     def _schedule_profile_job_if_needed(
         self,
         *,
@@ -571,6 +606,7 @@ class ConversationService:
         thinking_effort: str = "disabled",
         temperature: float | None = None,
         top_p: float | None = None,
+        switch_state: str = "",
     ) -> dict:
         return conversation_generation.execute_single_turn(
             self,
@@ -588,6 +624,7 @@ class ConversationService:
             thinking_effort=thinking_effort,
             temperature=temperature,
             top_p=top_p,
+            switch_state=switch_state,
         )
 
     @staticmethod
@@ -614,6 +651,7 @@ class ConversationService:
         thinking_effort: str = "disabled",
         temperature: float | None = None,
         top_p: float | None = None,
+        switch_state: str = "",
     ) -> dict:
         for attempt, delay_s in enumerate((0.0, *TURN_TRANSIENT_RETRY_DELAYS_S), start=1):
             if delay_s > 0:
@@ -635,6 +673,7 @@ class ConversationService:
                     thinking_effort,
                     temperature,
                     top_p,
+                    switch_state,
                 )
             except Exception as exc:
                 is_last_attempt = attempt > len(TURN_TRANSIENT_RETRY_DELAYS_S)
@@ -698,6 +737,14 @@ class ConversationService:
             runtime_bundle=runtime_bundle,
         )
         turn_num = len(results) + 1
+        runtime = config.setdefault("runtime", {})
+        switch_state = str(runtime.get("switch_state", "") or "").strip()
+        switch_state_status = str(runtime.get("switch_state_status", "") or "").strip().lower()
+        active_switch_state = (
+            switch_state
+            if switch_state and switch_state_status not in {"consumed", "cleared"}
+            else ""
+        )
 
         self.update_conversation_status(conv_id, "running")
         turn_data = self._execute_single_turn(
@@ -715,8 +762,14 @@ class ConversationService:
             thinking_effort=thinking_effort,
             temperature=temperature,
             top_p=top_p,
+            switch_state=active_switch_state,
         )
         self.insert_turn_result(conv_id, turn_data)
+        if active_switch_state:
+            runtime["switch_state"] = ""
+            runtime["switch_state_status"] = "consumed"
+            runtime["switch_state_consumed_turn"] = turn_num
+            self.update_conversation_config(conv_id, config)
         updated_results = [*results, turn_data]
         updated_history = [
             *conversation_history,
