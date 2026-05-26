@@ -19,6 +19,7 @@ from config import (  # noqa: E402
     build_prompt_alias_map,
     get_latest_prompt_file,
     is_main_prompt_file,
+    list_prompt_files,
     list_main_prompt_files,
     parse_main_prompt_version,
 )
@@ -53,6 +54,30 @@ def test_parse_main_prompt_version_and_ignore_non_prompt_docs(tmp_path: Path):
         "星朋友长文模式_提示词_v2.0.md",
     ]
     assert get_latest_prompt_file(tmp_path, fallback="fallback.md") == "星朋友长文模式_提示词_v2.3_20260324.md"
+
+
+def test_prompt_listing_recurses_and_excludes_archive_dirs(tmp_path: Path):
+    active_dir = tmp_path / "当前版"
+    archive_dir = tmp_path / "归档"
+    nested_archive_dir = active_dir / "archive_old"
+    active_dir.mkdir()
+    archive_dir.mkdir()
+    nested_archive_dir.mkdir()
+
+    (tmp_path / "星朋友长文模式_提示词_v2.0.md").write_text("v2.0", encoding="utf-8")
+    (active_dir / "星朋友长文模式_提示词_v5.2_20260522.md").write_text("v5.2", encoding="utf-8")
+    (archive_dir / "星朋友长文模式_提示词_v9.9_20260522.md").write_text("archive", encoding="utf-8")
+    (nested_archive_dir / "星朋友长文模式_提示词_v8.8_20260522.md").write_text("nested archive", encoding="utf-8")
+
+    ordered_main = [path.name for path in list_main_prompt_files(tmp_path)]
+    ordered_all = [path.name for path in list_prompt_files(tmp_path)]
+
+    assert ordered_main == [
+        "星朋友长文模式_提示词_v5.2_20260522.md",
+        "星朋友长文模式_提示词_v2.0.md",
+    ]
+    assert ordered_all[:2] == ordered_main
+    assert get_latest_prompt_file(tmp_path, fallback="fallback.md") == "星朋友长文模式_提示词_v5.2_20260522.md"
 
 
 def test_prompt_alias_map_prefers_latest_same_short_version(tmp_path: Path):
@@ -146,13 +171,27 @@ def test_build_runtime_config_preserves_existing_prompt_when_unspecified(monkeyp
     assert prompt_name == "星朋友长文模式_提示词_v2.0.md"
 
 
-def test_resolve_requested_prompt_supports_latest_auto_and_short_alias():
+def test_resolve_requested_prompt_supports_latest_auto_and_short_alias(monkeypatch):
     conversations_router = _import_router("routers.conversations")
-    latest = get_latest_prompt_file()
+    latest = "星朋友长文模式_提示词_v5.2_20260522.md"
+    alias_target = "星朋友长文模式_提示词_v5.2_20260522.md"
+    load_calls = []
+
+    class _StubPromptService:
+        def load_prompt_template(self, filename: str) -> str:
+            load_calls.append(filename)
+            if filename != alias_target:
+                raise FileNotFoundError(filename)
+            return "template"
+
+    monkeypatch.setattr(conversations_router, "get_latest_prompt_file", lambda: latest)
+    monkeypatch.setattr(conversations_router, "build_prompt_alias_map", lambda: {"v5.2": alias_target})
+    monkeypatch.setattr(conversations_router, "PromptService", _StubPromptService)
+
     assert conversations_router._resolve_requested_prompt("latest") == latest
     assert conversations_router._resolve_requested_prompt("auto") == latest
-    assert conversations_router._resolve_requested_prompt("v2.0") == "星朋友长文模式_提示词_v2.0.md"
-    assert conversations_router._resolve_requested_prompt("v2.3") == "星朋友长文模式_提示词_v2.3_20260324.md"
+    assert conversations_router._resolve_requested_prompt("v5.2") == alias_target
+    assert load_calls == [alias_target]
 
 
 def test_prompt_list_api_exposes_latest_metadata():

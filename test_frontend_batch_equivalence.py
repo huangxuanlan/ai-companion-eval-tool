@@ -310,14 +310,14 @@ def test_compare_models_expose_per_model_thinking_controls():
     assert "function getCompareThinkingState" in js_source
     assert "function applyCompareThinkingToSelected" in js_source
     assert "compare-thinking-select" in js_source
-    assert "getCompareThinkingState(model.id)" in js_source
+    assert "getCompareThinkingState(modelId)" in js_source
     assert "payload.thinking_enabled = thinking.enabled;" in js_source
     assert "payload.thinking_effort = thinking.thinking_effort;" in js_source
     assert "模型思考:" in js_source
     assert "思考全关" in html_source
     assert "思考高" in html_source
     assert "思考Max" in html_source
-    assert "legacy_bundle.js?v=97" in html_source
+    assert "legacy_bundle.js?v=106" in html_source
 
 
 def test_prompt_ab_batch_respects_configured_auto_scoring_concurrency():

@@ -35,6 +35,23 @@ async def get_latest_orchestration(kind: str = Query(default="")):
     return {"run": run}
 
 
+@router.get("")
+async def list_orchestration_runs(
+    kind: str = Query(default=""),
+    status: str = Query(default=""),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind and normalized_kind not in {"batch", "compare", "ab"}:
+        raise HTTPException(status_code=400, detail="kind 仅支持 batch、compare 或 ab")
+    runs = await orchestration_service.list_runs(
+        kind=normalized_kind,
+        status=status,
+        limit=limit,
+    )
+    return {"runs": runs}
+
+
 @router.get("/{run_id}")
 async def get_orchestration_run(run_id: str):
     run = await orchestration_service.get_run(run_id)

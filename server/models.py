@@ -139,6 +139,7 @@ class OrchestrationRunCreate(BaseModel):
     kind: Literal["batch", "compare", "ab"]
     title: str = ""
     concurrency: int = Field(default=1, ge=1, le=24)
+    config_snapshot: dict = Field(default_factory=dict)
     groups: list[OrchestrationGroupRequest] = Field(default_factory=list)
 
 

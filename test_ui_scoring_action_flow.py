@@ -206,6 +206,11 @@ async def main():
         make_turn(2, "第二轮输入", "第二轮输出", score_status="failed", score_total=0.0, reasoning="超时"),
         make_turn(3, "第三轮输入", "第三轮输出", score_status="unscored", score_total=0.0, reasoning=""),
     ]
+    batch_failed_turns = [
+        make_turn(1, "第一轮输入", "第一轮输出", score_status="failed", score_total=0.0, reasoning="超时"),
+        make_turn(2, "第二轮输入", "第二轮输出", score_status="unscored", score_total=0.0, reasoning=""),
+        make_turn(3, "第三轮输入", "第三轮输出", score_status="unscored", score_total=0.0, reasoning=""),
+    ]
 
     history_items = {
         "conv-summary": build_history_item(
@@ -236,6 +241,7 @@ async def main():
     detail_items = {
         "conv-summary": build_conversation_detail("conv-summary", "待汇总会话", summary_turns),
         "conv-retry": build_conversation_detail("conv-retry", "待重试会话", retry_turns),
+        "conv-batch-failed": build_conversation_detail("conv-batch-failed", "批量失败会话", batch_failed_turns),
     }
     scoring_items = {
         "conv-summary": build_scoring_payload(
@@ -262,7 +268,22 @@ async def main():
             recommended_action="retry_failed_turns",
             recommended_action_label="重试失败项",
         ),
+        "conv-batch-failed": build_scoring_payload(
+            "conv-batch-failed",
+            batch_failed_turns,
+            avg_total=None,
+            scored_count=0,
+            failed_count=1,
+            skipped_count=0,
+            report_status="waiting_scoring",
+            report_label="待评分完成",
+            recommended_action="",
+            recommended_action_label="",
+        ),
     }
+    for container_key in ("summary", "meta", "action"):
+        scoring_items["conv-batch-failed"][container_key].pop("recommended_action", None)
+        scoring_items["conv-batch-failed"][container_key].pop("recommended_action_label", None)
     results_call_count = {"conv-summary": 0, "conv-retry": 0}
     request_log: list[str] = []
 
@@ -309,6 +330,13 @@ async def main():
                         status=200,
                         content_type="application/json",
                         body=json.dumps(scoring_items["conv-retry"], ensure_ascii=False),
+                    )
+                    return
+                if path.endswith("/conv-batch-failed/results"):
+                    await route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps(scoring_items["conv-batch-failed"], ensure_ascii=False),
                     )
                     return
                 if path.endswith("/conv-summary/repair-summary"):
@@ -378,6 +406,42 @@ async def main():
                                 "status": "scoring_started",
                                 "conversation_id": "conv-retry",
                                 "turns_to_score": 2,
+                                "action": {
+                                    "recommended_action": "retry_failed_turns",
+                                    "recommended_action_label": "重试失败项",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                    return
+                if path.endswith("/conv-batch-failed/retry-failed-turns"):
+                    batch_completed_turns = [
+                        make_turn(1, "第一轮输入", "第一轮输出", score_status="scored", score_total=7.2, reasoning="重试成功"),
+                        make_turn(2, "第二轮输入", "第二轮输出", score_status="scored", score_total=7.6, reasoning="补打完成"),
+                        make_turn(3, "第三轮输入", "第三轮输出", score_status="scored", score_total=7.8, reasoning="补打完成"),
+                    ]
+                    detail_items["conv-batch-failed"] = build_conversation_detail("conv-batch-failed", "批量失败会话", batch_completed_turns)
+                    scoring_items["conv-batch-failed"] = build_scoring_payload(
+                        "conv-batch-failed",
+                        batch_completed_turns,
+                        avg_total=7.53,
+                        scored_count=3,
+                        failed_count=0,
+                        skipped_count=0,
+                        report_status="pending",
+                        report_label="等待生成报告",
+                        recommended_action="repair_summary",
+                        recommended_action_label="汇总评分",
+                    )
+                    await route.fulfill(
+                        status=200,
+                        content_type="application/json",
+                        body=json.dumps(
+                            {
+                                "status": "scoring_started",
+                                "conversation_id": "conv-batch-failed",
+                                "turns_to_score": 3,
                                 "action": {
                                     "recommended_action": "retry_failed_turns",
                                     "recommended_action_label": "重试失败项",
@@ -460,6 +524,9 @@ async def main():
             await page.evaluate("() => retryFailedScoringForConv('conv-retry', null)")
             await page.wait_for_timeout(1500)
 
+            await page.evaluate("() => triggerConversationScoringFromBatch('conv-batch-failed', null)")
+            await page.wait_for_timeout(1500)
+
             history_text_after_retry = await page.locator("#history-tbody").text_content()
             if "7.6" not in (history_text_after_retry or ""):
                 raise AssertionError(f"重试失败项后历史列表未更新综合评分: {history_text_after_retry}")
@@ -468,6 +535,8 @@ async def main():
                 raise AssertionError(f"一键打分未命中 repair-summary: {request_log}")
             if "POST /api/scoring/conv-retry/retry-failed-turns" not in request_log:
                 raise AssertionError(f"历史重试未命中 retry-failed-turns: {request_log}")
+            if "POST /api/scoring/conv-batch-failed/retry-failed-turns" not in request_log:
+                raise AssertionError(f"批量行重试未命中 retry-failed-turns: {request_log}")
             if any(path.endswith("/rescore-all") for path in request_log):
                 raise AssertionError(f"本次回归不应触发 rescore-all: {request_log}")
 

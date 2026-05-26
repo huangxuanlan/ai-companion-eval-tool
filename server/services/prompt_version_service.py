@@ -26,6 +26,7 @@ from config import (
     SCORING_PROMPT_FILE_RE,
     SUMMARY_PROMPT_FILE_RE,
     get_latest_prompt_file,
+    list_prompt_markdown_files,
     list_prompt_files,
     parse_named_prompt_version,
 )
@@ -149,17 +150,27 @@ class VersionedPromptStore:
             return []
         files = [
             path
-            for path in self.dir_path.iterdir()
-            if path.is_file() and path.suffix.lower() == ".md" and self._is_version_file(path)
+            for path in list_prompt_markdown_files(self.dir_path)
+            if self._is_version_file(path)
         ]
         files.sort(key=self._version_key, reverse=True)
         return files
+
+    def _path_for_filename(self, filename: str) -> Path:
+        requested = _normalize_filename(filename)
+        direct = self.dir_path / requested
+        if direct.exists():
+            return direct
+        for path in self._list_files():
+            if path.name == requested:
+                return path
+        return direct
 
     def get_active_filename(self) -> str:
         self.ensure_dir_only()
         meta = self._read_meta()
         active_filename = _normalize_filename(meta.get("active_filename", ""))
-        if active_filename and (self.dir_path / active_filename).exists():
+        if active_filename and self._path_for_filename(active_filename).exists():
             return active_filename
         files = self._list_files()
         return files[0].name if files else ""
@@ -218,14 +229,14 @@ class VersionedPromptStore:
                 raise FileNotFoundError(f"{self.kind} 提示词目录为空")
             return files[0].name
 
-        target = self.dir_path / requested
+        target = self._path_for_filename(requested)
         if not target.exists():
             raise FileNotFoundError(f"{self.kind} 提示词不存在: {requested}")
         return requested
 
     def read_prompt(self, filename: str | None = None) -> dict:
         resolved = self.resolve_filename(filename)
-        path = self.dir_path / resolved
+        path = self._path_for_filename(resolved)
         content = path.read_text(encoding="utf-8")
         return {
             "filename": resolved,
@@ -238,7 +249,7 @@ class VersionedPromptStore:
 
     def save_prompt(self, filename: str, content: str) -> dict:
         resolved = self.resolve_filename(filename)
-        path = self.dir_path / resolved
+        path = self._path_for_filename(resolved)
         path.write_text(content, encoding="utf-8")
         return {
             "message": "保存成功",
@@ -282,7 +293,7 @@ class VersionedPromptStore:
 
     def download_path(self, filename: str) -> Path:
         resolved = self.resolve_filename(filename)
-        return self.dir_path / resolved
+        return self._path_for_filename(resolved)
 
     def _next_version_filename(self) -> str:
         files = self._list_files()

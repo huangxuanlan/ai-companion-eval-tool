@@ -283,7 +283,135 @@ def test_deepseek_v4_models_are_registered_for_dashscope():
     assert "deepseek-v4-pro" in models
     assert models["deepseek-v4-flash"]["provider"] == "aliyun"
     assert models["deepseek-v4-flash"]["capabilities"]["thinking"] is True
+    assert models["deepseek-v4-flash"]["tier"] == "pro"
+    assert models["deepseek-v4-flash"]["capabilities"]["supports_reasoning_effort"] is True
+    assert models["deepseek-v4-flash"]["capabilities"]["thinking_efforts"] == ["disabled", "high", "max"]
+    assert models["deepseek-v4-flash"]["capabilities"]["default_thinking_effort"] == "high"
+    assert models["deepseek-v4-pro"]["capabilities"]["thinking_efforts"] == ["disabled", "high", "max"]
     assert adapter.normalize_model_id("deepseek-v4-pro") == "deepseek-v4-pro"
+    assert adapter.resolve_thinking_effort("deepseek-v4-pro", True, "low") == "high"
+    assert adapter.resolve_thinking_effort("deepseek-v4-pro", True, "xhigh") == "max"
+
+
+def test_deepseek_v3_models_use_dedicated_openai_compatible_endpoints(monkeypatch):
+    captured_clients: list[dict] = []
+    aliyun_module = model_adapter._load_provider_module("aliyun")
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured_clients.append(kwargs)
+
+    monkeypatch.setattr(aliyun_module, "OpenAI", FakeOpenAI)
+
+    adapter = model_adapter.ModelAdapter()
+    monkeypatch.setenv("DEEPSEEK_V3_API_KEY", "v3-key")
+    monkeypatch.setenv("DEEPSEEK_V31_API_KEY", "v31-key")
+
+    v3 = adapter._instantiate_provider("deepseek-v3")
+    v31 = adapter._instantiate_provider("deepseek-v3.1")
+
+    assert v3.model_name == "xdeepseekv3"
+    assert v31.model_name == "deepseek-ai/DeepSeek-V3.1"
+    assert captured_clients == [
+        {
+            "base_url": "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+            "api_key": "v3-key",
+        },
+        {
+            "base_url": "https://llm.bitleapai.cn/v1",
+            "api_key": "v31-key",
+        },
+    ]
+    assert adapter.normalize_model_id("xdeepseekv3") == "deepseek-v3"
+    assert adapter.normalize_model_id("deepseek-ai/DeepSeek-V3.1") == "deepseek-v3.1"
+
+
+def test_deepseek_v3_capability_matrix_matches_live_probe():
+    adapter = model_adapter.ModelAdapter()
+    models = {item["id"]: item for item in adapter.list_models()}
+
+    assert models["deepseek-v3"]["capabilities"]["thinking"] is False
+    assert models["deepseek-v3.1"]["capabilities"]["thinking"] is True
+    assert models["deepseek-v3.2"]["capabilities"]["thinking"] is True
+    assert adapter._models["deepseek-v3.1"]["thinking"]["supports_reasoning_effort"] is True
+    assert adapter._models["deepseek-v3.2"]["thinking"]["supports_reasoning_effort"] is True
+
+
+def test_deepseek_v3_does_not_send_thinking_params_even_when_requested(monkeypatch):
+    captured: dict[str, object] = {}
+    aliyun_module = model_adapter._load_provider_module("aliyun")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=5),
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(aliyun_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setenv("DEEPSEEK_V3_API_KEY", "v3-key")
+
+    adapter = model_adapter.ModelAdapter()
+    result = adapter.chat(
+        "deepseek-v3",
+        [{"role": "user", "content": "hi"}],
+        thinking_effort="max",
+    )
+
+    assert result.success is True
+    assert captured["model"] == "xdeepseekv3"
+    assert "extra_body" not in captured
+    assert "reasoning_effort" not in captured
+
+
+def test_deepseek_v31_aliyun_provider_passes_reasoning_effort(monkeypatch):
+    captured: dict[str, object] = {}
+    aliyun_module = model_adapter._load_provider_module("aliyun")
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="ok",
+                            reasoning_content="thinking",
+                        )
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=5),
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = FakeChat()
+
+    monkeypatch.setattr(aliyun_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setenv("DEEPSEEK_V31_API_KEY", "v31-key")
+
+    adapter = model_adapter.ModelAdapter()
+    result = adapter.chat(
+        "deepseek-v3.1",
+        [{"role": "user", "content": "hi"}],
+        thinking_effort="xhigh",
+    )
+
+    assert result.success is True
+    assert captured["model"] == "deepseek-ai/DeepSeek-V3.1"
+    assert captured["reasoning_effort"] == "max"
+    assert captured["extra_body"]["enable_thinking"] is True
 
 
 def test_deepseek_v4_aliyun_provider_passes_reasoning_effort(monkeypatch):

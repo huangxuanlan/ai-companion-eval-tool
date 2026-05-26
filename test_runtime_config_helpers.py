@@ -15,6 +15,7 @@ from services.runtime_config import (  # noqa: E402
     apply_relationship_defaults,
     apply_runtime_defaults,
     apply_temporal_defaults,
+    normalize_longform_config_contract,
     normalize_frontend_aliases,
 )
 
@@ -104,6 +105,83 @@ def test_apply_runtime_defaults_sets_prompt_and_runtime_fields():
     assert config["runtime"]["model_ids"] == ["doubao-pro"]
     assert config["runtime"]["temperature"] == 0.8
     assert config["runtime"]["top_p"] == 0.9
+    assert config["runtime"]["schema_version"] == "2026-05-22"
+    assert config["runtime_schema_version"] == "2026-05-22"
+
+
+def test_normalize_longform_config_contract_aligns_web_and_cli_payloads():
+    web_payload = {
+        "model_id": "deepseek-v4-pro",
+        "model_ids": ["deepseek-v4-pro", "qwen-plus"],
+        "compare_mode": "model",
+        "model_mini": "doubao-lite",
+        "scoring_model_id": "qwen-plus",
+        "profile_model_id": "deepseek-profile",
+        "profile_prompt_version": "profile-latest",
+        "thinking_enabled": True,
+        "thinking_effort": "max",
+        "scoring_thinking_enabled": False,
+        "scoring_thinking_effort": "disabled",
+        "summary_interval": "0",
+        "injection_depth": "0",
+        "temperature": "0.8",
+        "top_p": "0.9",
+        "prompt_version": "latest",
+        "few_shot_file": "fewshot.md",
+        "turns": "第一轮\n第二轮",
+        "character": {"Role_Nickname": "阿衡", "personality": "理性沉稳"},
+        "context": {"scene": "雨夜", "time_period": "深夜", "user_nickname": "小鹿"},
+        "modules": {"longform_few_shot": "fewshot.md", "monthly_schedule": "周末约会"},
+        "custom_variables": {"moments": "刚发了朋友圈", "monthly_schedule": "周末约会"},
+    }
+    cli_config = {
+        "prompt_file": "latest",
+        "few_shot_file": "fewshot.md",
+        "turns": ["第一轮", "第二轮"],
+        "character": {"Role_Nickname": "阿衡", "personal_type": "理性沉稳"},
+        "context": {
+            "current_scene": "雨夜",
+            "timeperiod": "深夜",
+            "user_nickname": "小鹿",
+        },
+        "modules": {"longform_few_shot": "fewshot.md", "monthly_schedule": "周末约会"},
+        "custom_variables": {"moments": "刚发了朋友圈", "monthly_schedule": "周末约会"},
+        "runtime": {
+            "model_ids": ["deepseek-v4-pro", "qwen-plus"],
+            "compare_mode": "model",
+            "model_mini": "doubao-lite",
+            "scoring_model_id": "qwen-plus",
+            "profile_model_id": "deepseek-profile",
+            "profile_prompt_version": "profile-latest",
+            "thinking_enabled": True,
+            "thinking_effort": "max",
+            "scoring_thinking_enabled": False,
+            "scoring_thinking_effort": "disabled",
+            "summary_interval": 1,
+            "injection_depth": 1,
+            "temperature": 0.8,
+            "top_p": 0.9,
+        },
+    }
+
+    normalized_web = normalize_longform_config_contract(web_payload)
+    normalized_cli = normalize_longform_config_contract(cli_config)
+
+    assert normalized_web["runtime_schema_version"] == "2026-05-22"
+    assert normalized_web["runtime"]["schema_version"] == "2026-05-22"
+    assert normalized_web["turns"] == normalized_cli["turns"] == ["第一轮", "第二轮"]
+    assert normalized_web["runtime"]["model_ids"] == normalized_cli["runtime"]["model_ids"]
+    assert normalized_web["runtime"]["compare_mode"] == normalized_cli["runtime"]["compare_mode"] == "model"
+    assert normalized_web["runtime"]["profile_model_id"] == normalized_cli["runtime"]["profile_model_id"] == "deepseek-profile"
+    assert normalized_web["runtime"]["profile_prompt_version"] == normalized_cli["runtime"]["profile_prompt_version"] == "profile-latest"
+    assert normalized_web["runtime"]["thinking_effort"] == "max"
+    assert normalized_web["runtime"]["scoring_thinking_enabled"] is False
+    assert normalized_web["runtime"]["summary_interval"] == 1
+    assert normalized_web["runtime"]["injection_depth"] == 1
+    assert normalized_web["context"]["current_scene"] == normalized_cli["context"]["current_scene"]
+    assert normalized_web["context"]["timeperiod"] == normalized_cli["context"]["timeperiod"]
+    assert normalized_web["modules"]["user_Nickname"] == normalized_cli["modules"]["user_Nickname"]
+    assert normalized_web["custom_variables"] == normalized_cli["custom_variables"]
 
 
 def test_build_longform_variable_bundle_reuses_same_prompt_and_relationship_logic():

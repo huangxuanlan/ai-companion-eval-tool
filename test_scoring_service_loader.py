@@ -796,7 +796,7 @@ def test_generate_scoring_report_defaults_to_qwen_plus_and_persists_cache(monkey
     service.scoring_report_prompt_store = SimpleNamespace(
         read_prompt=lambda filename=None: {
             "filename": "长文模式评分摘要报告提示词_v1.0_20260420.md",
-            "content": "report_meta_json:\n{{report_meta_json}}\n\ndimension_stats_json:\n{{dimension_stats_json}}\n\ncase_items_json:\n{{case_items_json}}",
+            "content": "report_meta_json:\n{{report_meta_json}}\n\ndimension_stats_json:\n{{dimension_stats_json}}\n\ncase_items_json:\n{{case_items_json}}\n\ndiagnostics_json:\n{{diagnostics_json}}",
         }
     )
 
@@ -866,6 +866,10 @@ def test_generate_scoring_report_defaults_to_qwen_plus_and_persists_cache(monkey
 
     assert captured["model_id"] == "qwen-plus"
     assert "角色稳定，格式合规。" in captured["prompt"]
+    assert "diagnostics_json:" in captured["prompt"]
+    assert "evidence_chain" in captured["prompt"]
+    assert "failure_diagnostics" in captured["prompt"]
+    assert "low_score_clusters" in captured["prompt"]
     assert result["cached"] is False
     assert saved["target_type"] == "conversation_scoring"
     assert saved["report_kind"] == "scoring_report"
@@ -1204,6 +1208,52 @@ def test_scoring_service_sends_dashscope_thinking_budget(monkeypatch):
 
     assert captured["extra_body"]["enable_thinking"] is True
     assert captured["extra_body"]["thinking_budget"] == 4096
+    assert result["reasoning_content"] == "思考轨迹"
+
+
+def test_scoring_service_sends_deepseek_v4_reasoning_effort(monkeypatch):
+    service = scoring_service.ScoringService()
+    service._config = {"dimensions": ["persona_fidelity"]}
+    captured = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content='{"scores":{"persona_fidelity":5},"weighted_total":5,"mapped_total":10,"reasoning":"ok"}',
+                            reasoning_content="思考轨迹",
+                        )
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=12, completion_tokens=34),
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions()))
+    monkeypatch.setattr(service, "_get_client", lambda timeout_s=None, model_id=None: fake_client)
+    monkeypatch.setattr(
+        service,
+        "_parse_score_payload",
+        lambda text: {
+            "scores": {"persona_fidelity": 5},
+            "weighted_total": 5,
+            "mapped_total": 10,
+            "reasoning": "ok",
+        },
+    )
+
+    result = service._call_scoring_via_openai(
+        model_alias="deepseek-v4-pro",
+        candidate_model="deepseek-v4-pro",
+        system_prompt="system",
+        user_content="user",
+        thinking_effort="max",
+    )
+
+    assert captured["reasoning_effort"] == "max"
+    assert "extra_body" not in captured
     assert result["reasoning_content"] == "思考轨迹"
 
 

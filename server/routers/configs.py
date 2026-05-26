@@ -25,7 +25,10 @@ from config import (
 from models import ConfigSaveRequest
 from services.export_service import ExportService
 from services.prompt_service import PromptService
-from services.runtime_config import build_longform_variable_bundle
+from services.runtime_config import (
+    build_longform_variable_bundle,
+    normalize_longform_config_contract,
+)
 from services.public_demo import is_public_demo_mode, raise_if_demo_write_blocked
 
 router = APIRouter(prefix="/api/configs", tags=["configs"])
@@ -261,6 +264,7 @@ def _normalize_save_payload(data: ConfigSaveRequest) -> tuple[str, str, dict]:
     if not _has_snapshot_content(config):
         raise HTTPException(status_code=400, detail="config 不能为空")
 
+    config = normalize_longform_config_contract(config)
     name = (data.name or _derive_config_name(config)).strip()
     type_ = (data.type or "").strip() or "custom_config"
     return name, type_, config

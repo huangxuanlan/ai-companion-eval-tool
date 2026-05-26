@@ -81,8 +81,8 @@ def test_default_json_fewshot_and_summary():
     assert_true(len(counts) >= 6, f"未解析到 6 轮消息数: {counts}")
     # legacy CLI 首轮跳过 few-shot，仅保留 system + 首轮提示 + Core_Constraints + 当前输入
     assert_true(counts[0] == 4, f"Turn1 消息数错误: {counts}")
-    # legacy CLI 仍沿用旧 dry-run 拼接：2 组 few-shot + 5 轮历史 + Core_Constraints + 当前输入
-    assert_true(counts[5] == 20, f"Turn6 消息数错误: {counts}")
+    # strict few-shot matching selects 1 示例组；第 6 轮额外注入摘要。
+    assert_true(counts[5] == 19, f"Turn6 消息数错误: {counts}")
 
 
 def test_explicit_fewshot_path():
@@ -100,7 +100,7 @@ def test_explicit_fewshot_path():
         )
         assert_true(proc.returncode == 0, f"显式 Few-shot dry-run 失败: {proc.stderr}")
         counts = message_counts(proc.stdout)
-        assert_true(counts[:2] == [4, 12], f"显式 Few-shot 消息数错误: {counts}")
+        assert_true(counts[:2] == [4, 10], f"显式 Few-shot 消息数错误: {counts}")
         exported = list(out_dir.glob("*.json")) + list(out_dir.glob("*.xlsx"))
         assert_true(not exported, f"显式 Few-shot dry-run 产生导出文件: {[p.name for p in exported]}")
 
@@ -114,6 +114,34 @@ def test_cli_constraints_aligned_to_v26():
     assert_true("对白用「」包裹" not in source, "CLI 仍残留旧对白格式约束")
 
 
+def test_cli_config_normalizer_uses_shared_runtime_schema():
+    import longform_multi_turn as cli
+
+    normalized = cli.normalize_cli_config(
+        {
+            "prompt_file": "prompt.md",
+            "few_shot_file": "fewshot.md",
+            "turns": "第一轮\n第二轮",
+            "character": {"Role_Nickname": "阿衡", "personality": "理性沉稳"},
+            "context": {"scene": "雨夜", "time_period": "深夜"},
+            "modules": {"longform_few_shot": "fewshot.md"},
+            "custom_variables": {"moments": "刚发了朋友圈"},
+            "runtime": {
+                "model_ids": ["deepseek-v4-pro"],
+                "thinking_effort": "max",
+                "scoring_thinking_enabled": False,
+                "scoring_thinking_effort": "disabled",
+            },
+        }
+    )
+
+    assert_true(normalized["runtime_schema_version"] == "2026-05-22", "CLI 未写入共享 schema 版本")
+    assert_true(normalized["runtime"]["schema_version"] == "2026-05-22", "CLI runtime 未写入 schema 版本")
+    assert_true(normalized["turns"] == ["第一轮", "第二轮"], "CLI turns 未按共享契约规范化")
+    assert_true(normalized["runtime"]["thinking_effort"] == "max", "CLI thinking_effort 丢失")
+    assert_true(normalized["runtime"]["scoring_thinking_enabled"] is False, "CLI scoring thinking 开关丢失")
+
+
 def main():
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     tests = [
@@ -121,6 +149,7 @@ def main():
         ("默认 JSON Few-shot 与摘要注入", test_default_json_fewshot_and_summary),
         ("显式 Few-shot 路径", test_explicit_fewshot_path),
         ("CLI 约束已对齐 v2.6", test_cli_constraints_aligned_to_v26),
+        ("CLI 共享 runtime schema", test_cli_config_normalizer_uses_shared_runtime_schema),
     ]
     passed = 0
     for name, test in tests:

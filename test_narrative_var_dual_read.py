@@ -113,6 +113,15 @@ def prompt_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         "INTIMACY_BOUNDARY_DOC",
         narrative_dir / "intimacy_boundary.md",
     )
+    few_shot_root = narrative_dir / "示例——长文模式"
+    latest_few_shot_dir = few_shot_root / "最新版本"
+    monkeypatch.setattr(PromptService, "FEW_SHOT_LATEST_DIR", latest_few_shot_dir)
+    monkeypatch.setattr(PromptService, "FEW_SHOT_SOURCE_ROOTS", [latest_few_shot_dir])
+    monkeypatch.setattr(
+        PromptService,
+        "FEW_SHOT_SEARCH_PATHS",
+        [latest_few_shot_dir, few_shot_root, project_dir],
+    )
 
     monkeypatch.setattr(config, "RELATIONSHIP_PRESETS", relationship_presets)
     monkeypatch.setattr(config, "PRESET_CHARACTERS", preset_characters)
@@ -136,6 +145,7 @@ def prompt_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return {
         "variable_dir": variable_dir,
         "narrative_dir": narrative_dir,
+        "few_shot_dir": latest_few_shot_dir,
         "project_dir": project_dir,
         "relationship_presets": relationship_presets,
         "preset_characters": preset_characters,
@@ -232,7 +242,7 @@ def test_load_intimacy_boundary_prefers_new_doc_and_falls_back(prompt_sources):
 
 def test_load_few_shot_examples_filters_by_relationship_and_limits_pairs(prompt_sources):
     narrative_dir = prompt_sources["narrative_dir"]
-    few_shot_dir = narrative_dir / "示例——长文模式"
+    few_shot_dir = prompt_sources["few_shot_dir"]
 
     _write(
         few_shot_dir / "霸道腹黑型男性 Few-shot 示例.md",
@@ -301,7 +311,7 @@ def test_resolve_few_shot_reference_prefers_latest_file_with_relationship_match(
     monkeypatch: pytest.MonkeyPatch,
 ):
     narrative_dir = prompt_sources["narrative_dir"]
-    few_shot_dir = narrative_dir / "示例——长文模式"
+    few_shot_dir = prompt_sources["few_shot_dir"]
 
     _write(
         few_shot_dir / "霸道腹黑型女性 Few-shot 示例（精选版）_v9_20260414.md",
@@ -352,7 +362,7 @@ def test_resolve_few_shot_reference_excludes_archive_from_auto_selection(
     monkeypatch: pytest.MonkeyPatch,
 ):
     narrative_dir = prompt_sources["narrative_dir"]
-    few_shot_dir = narrative_dir / "示例——长文模式"
+    few_shot_dir = prompt_sources["few_shot_dir"]
     archive_dir = few_shot_dir / "归档"
 
     active_path = few_shot_dir / "温暖陪伴型男性 Few-shot 示例（精选版）_v15.md"
@@ -406,12 +416,12 @@ def test_resolve_few_shot_reference_excludes_archive_from_auto_selection(
     assert resolved == active_path
     assert "归档" not in display_path
     assert auto_messages[0]["content"] == "*active user*"
-    assert explicit_messages[0]["content"] == "*archived user*"
+    assert explicit_messages[0]["content"] == "*active user*"
 
 
 def test_prepare_runtime_bundle_routes_few_shot_with_scene_preference(prompt_sources):
     narrative_dir = prompt_sources["narrative_dir"]
-    few_shot_dir = narrative_dir / "示例——长文模式"
+    few_shot_dir = prompt_sources["few_shot_dir"]
 
     _write(
         prompt_sources["project_dir"] / "prompt.md",
@@ -473,7 +483,7 @@ def test_prepare_runtime_bundle_routes_few_shot_with_scene_preference(prompt_sou
 
 def test_prepare_runtime_bundle_renders_few_shot_role_alias(prompt_sources):
     narrative_dir = prompt_sources["narrative_dir"]
-    few_shot_dir = narrative_dir / "示例——长文模式"
+    few_shot_dir = prompt_sources["few_shot_dir"]
 
     _write(
         prompt_sources["project_dir"] / "prompt.md",

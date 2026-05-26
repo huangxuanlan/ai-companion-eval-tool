@@ -938,7 +938,7 @@
       </div>
       <div id="chat-messages"></div>
       <div id="input-area">
-        <textarea id="user-input" rows="1" placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+        <textarea id="user-input" rows="1" placeholder="输入消息... (Enter发送，Ctrl+Enter换行)"
           onkeydown="handleInputKey(event)" oninput="autoResize(this)"></textarea>
         <button class="btn btn-primary" id="send-btn" onclick="sendMessage()">➤</button>
       </div>
@@ -1903,10 +1903,18 @@
     }
 
     function handleInputKey(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      if (e.ctrlKey) {
         e.preventDefault();
-        sendMessage();
+        const start = e.target.selectionStart ?? e.target.value.length;
+        const end = e.target.selectionEnd ?? start;
+        e.target.value = `${e.target.value.slice(0, start)}\n${e.target.value.slice(end)}`;
+        e.target.selectionStart = e.target.selectionEnd = start + 1;
+        autoResize(e.target);
+        return;
       }
+      e.preventDefault();
+      sendMessage();
     }
 
     function autoResize(el) {

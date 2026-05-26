@@ -166,6 +166,7 @@ def _build_initial_run_payload(data: OrchestrationRunCreate) -> tuple[dict, dict
         "kind": data.kind,
         "title": str(data.title or "").strip(),
         "concurrency": int(data.concurrency or 1),
+        "config_snapshot": deepcopy(data.config_snapshot or {}),
         "groups": manifest_groups,
     }
     state = {
@@ -312,6 +313,7 @@ def _public_run(run: dict | None) -> dict | None:
         "concurrency": int(run.get("concurrency", 1) or 1),
         "created_at": run.get("created_at"),
         "updated_at": run.get("updated_at"),
+        "config_snapshot": deepcopy(manifest.get("config_snapshot", {}) or {}),
         "manifest": manifest,
         "groups": groups,
         "summary": summary,
@@ -562,6 +564,28 @@ async def get_latest_run(kind: str) -> dict | None:
         if refreshed:
             return _public_run(refreshed)
     return None
+
+
+async def list_runs(
+    kind: str = "",
+    status: str = "",
+    limit: int = 20,
+) -> list[dict]:
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_status = str(status or "").strip().lower()
+    statuses = [normalized_status] if normalized_status else None
+    candidates = db.list_orchestration_runs(
+        kind=normalized_kind or None,
+        statuses=statuses,
+        limit=max(1, min(int(limit or 20), 100)),
+    )
+    runs: list[dict] = []
+    for item in candidates:
+        refreshed = await _refresh_run_state(item["id"], persist=False)
+        public = _public_run(refreshed or item)
+        if public:
+            runs.append(public)
+    return runs
 
 
 async def _start_or_resume_item(run: dict, group_index: int, item_index: int) -> dict:

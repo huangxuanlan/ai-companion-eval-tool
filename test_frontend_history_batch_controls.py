@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -337,7 +338,7 @@ def test_rescore_requests_force_latest_scoring_prompt_and_refresh_summary():
     assert "function resolveScoringPromptRequestVersion" in source
     assert "preferLatestPrompt = true" in source
     assert "forceFullRescore = false" in scoring_body
-    assert "function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = false } = {})" in source
+    assert "function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = false, actionOverride = '' } = {})" in source
     assert "function runConversationScoringAction(convId, action, { preferLatestPrompt = true } = {})" in source
     assert "runConversationScoringAction(convId, actionMeta.action, { preferLatestPrompt: true })" in scoring_body
     assert "`/api/scoring/${convId}/rescore-all`" in source
@@ -375,14 +376,16 @@ def test_history_bulk_actions_use_confirm_modal_and_regenerate_summaries():
 def test_test_center_rows_retry_failed_scores_and_refresh_run_state():
     source = JS_PATH.read_text(encoding="utf-8")
     row_body = _slice(source, "function applyBatchRunItemToRow(row, item", "function applyBatchOrchestrationRun(run)")
-    trigger_body = _slice(source, "async function triggerConversationScoringFromBatch(convId, btnEl)", "const SCORING_SUMMARY_DIMENSIONS")
+    trigger_body = _slice(source, "async function triggerConversationScoringFromBatch(convId, btnEl, actionOverride = '')", "const SCORING_SUMMARY_DIMENSIONS")
     retry_body = _slice(source, "async function retryFailedScoringItems()", "async function refreshCurrentBatchRunState()")
 
     assert "const failedTurns = Number(item.failed_turns || 0);" in row_body
     assert "pendingScoringTurns > 0" in row_body
     assert "const label = failedTurns > 0 ? '重试失败项' : '同步评分';" in row_body
-    assert "triggerConversationScoringFromBatch('${convId}', this)" in row_body
-    assert "const actionMeta = getConversationScoringActionMeta(current);" in trigger_body
+    assert "const action = failedTurns > 0 ? 'retry_failed_turns' : '';" in row_body
+    assert "triggerConversationScoringFromBatch('${convId}', this${actionArg})" in row_body
+    assert "async function triggerConversationScoringFromBatch(convId, btnEl, actionOverride = '')" in trigger_body
+    assert "const actionMeta = getConversationScoringActionMeta(current, { actionOverride });" in trigger_body
     assert "runConversationScoringAction(id, actionMeta.action" in trigger_body
     assert "watchConversationScoreRefresh(id, { allowDelayed: true })" in trigger_body
     assert "await refreshCurrentBatchRunState();" in trigger_body
@@ -495,7 +498,7 @@ def test_orchestration_notice_renders_retry_entry_and_cache_busted_bundle():
     assert 'id="orchestration-env-notice"' in html
     assert "onclick=\"retryOrchestrationEnvironmentProbe()\"" in source
     assert "function renderOrchestrationEnvironmentNotice()" in source
-    assert 'legacy_bundle.js?v=97' in html
+    assert re.search(r'legacy_bundle\.js\?v=\d+', html)
 
 
 def test_prompt_ab_batch_mode_reuses_excel_and_orchestration_controls():
@@ -616,7 +619,8 @@ def test_batch_retry_confirmation_mentions_unfinished_turns():
 
     assert "确认批量重试失败/未完成打分项" in retry_items_body
     assert "失败/未完成轮次" in retry_items_body
-    assert "这些失败/未完成轮次" in retry_items_body
+    assert "只会补齐失败/未完成轮次" in retry_items_body
+    assert "不会重跑已成功轮次" in retry_items_body
 
 
 def test_batch_and_compare_stop_wait_for_polling_to_finalize():
@@ -656,3 +660,104 @@ def test_chat_control_row_calls_conversation_control_api():
     assert "async function cancelActiveConversation()" in source
     assert "state.chatSessionMode !== 'interactive'" in control_body
     assert "isControllableConversationStatus" in control_body
+
+
+def test_history_page_has_conversation_and_run_tabs_with_run_snapshot_renderer():
+    html = HTML_PATH.read_text(encoding="utf-8")
+    source = JS_PATH.read_text(encoding="utf-8")
+    css = CSS_PATH.read_text(encoding="utf-8")
+    run_body = _slice(source, "function getRunHistoryLimit()", "async function viewConversation(id)")
+
+    assert 'role="tablist" aria-label="历史记录类型"' in html
+    assert 'id="history-tab-conversations"' in html
+    assert 'id="history-tab-runs"' in html
+    assert 'id="history-conversations-panel"' in html
+    assert 'id="history-runs-panel"' in html
+    assert 'id="run-history-list"' in html
+    assert "function switchHistoryTab" in source
+    assert "function loadRunHistory" in source
+    assert "/api/orchestrations?limit=${encodeURIComponent(limit)}" in run_body
+    assert "run.config_snapshot" in run_body
+    assert "config_snapshot" in run_body
+    assert "formatRunConfigSnapshot(getRunConfigSnapshot(run))" in run_body
+    assert ".run-history-card" in css
+    assert ".run-history-snapshot pre" in css
+
+
+def test_model_compare_navigation_has_aria_state_semantics():
+    html = HTML_PATH.read_text(encoding="utf-8")
+    source = JS_PATH.read_text(encoding="utf-8")
+    switch_body = _slice(source, "function switchTestCenterMode(mode", "function switchTestCenterTab(event, tabId)")
+    compare_body = _slice(source, "async function initComparePage()", "function loadConfigToCompare()")
+    toggle_body = _slice(source, "function syncCompareModeButtonState", "function updateFreeChatReturnButton")
+
+    assert 'id="btn-toggle-compare"' in html
+    assert 'aria-pressed="false"' in html
+    assert 'role="tab" aria-selected="true" aria-controls="tc-tab-batch"' in html
+    assert 'role="tab" aria-selected="false" aria-controls="tc-tab-compare"' in html
+    assert "card.setAttribute('aria-selected'" in switch_body
+    assert "content.setAttribute('aria-hidden'" in switch_body
+    assert "label.setAttribute('role', 'button')" in compare_body
+    assert "label.setAttribute('aria-pressed', 'false')" in compare_body
+    assert "function syncCompareModelSelectionStates()" in source
+    assert "row.setAttribute('aria-pressed'" in source
+    assert "btn.setAttribute('aria-pressed'" in toggle_body
+
+
+def test_scoring_diagnostics_are_rendered_in_score_and_report_modals():
+    html = HTML_PATH.read_text(encoding="utf-8")
+    source = JS_PATH.read_text(encoding="utf-8")
+    css = CSS_PATH.read_text(encoding="utf-8")
+    apply_body = _slice(source, "function applyConversationScoreResults(data = {})", "async function syncScoreResults()")
+    report_body = _slice(source, "function renderAiSummaryMarkdown", "function renderAiSummaryError")
+
+    assert 'id="scoring-diagnostics"' in html
+    assert 'id="ai-summary-diagnostics"' in html
+    assert "function normalizeScoringDiagnostics" in source
+    assert "function renderScoreEvidenceChain" in source
+    assert "function renderFailureDiagnostics" in source
+    assert "function renderLowScoreClusters" in source
+    assert "function jumpToScoreEvidenceTurn" in source
+    assert "function setScoreClusterFilter" in source
+    assert "rate_limited: '触发限流'" in source
+    assert "skipped_empty_output: '空输出跳过'" in source
+    assert "scoring_failed: '打分失败'" in source
+    assert "scoreDiagnosticsConversationId: ''" in source
+    assert "state.scoreDiagnosticsConversationId !== conversationId" in apply_body
+    assert "const validClusters = new Set" in apply_body
+    assert "state.scoreClusterFilter = '';" in apply_body
+    assert "state.scoreDiagnostics = diagnostics;" in apply_body
+    assert "_evidence: evidenceByTurn.get(turnNumber) || null" in apply_body
+    assert "_low_score_clusters: clustersByTurn.get(turnNumber) || []" in apply_body
+    assert "...normalizeScoringDiagnostics(summary)" in source
+    assert "renderAiSummaryDiagnostics(summary);" in report_body
+    assert "buildScoringDiagnosticsHtml(normalized, { compact: true, interactive: false })" in source
+    assert "renderScoreEvidenceChain(evidencePreview, { interactive })" in source
+    assert ".score-diagnostics-shell" in css
+    assert ".score-diagnostics-shell.is-readonly" in css
+    assert ".score-cluster-card" in css
+    assert ".score-evidence-chain" in css
+
+
+def test_runtime_config_schema_version_is_shared_by_web_payloads():
+    source = JS_PATH.read_text(encoding="utf-8")
+    payload_body = _slice(source, "function buildConversationRunPayload", "function buildConfigSnapshotRequest")
+    interactive_body = _slice(source, "function buildInteractiveConversationPayload", "function buildABConversationPayload")
+    snapshot_body = _slice(source, "function buildConfigSnapshotRequest", "async function fetchConversationDetailById")
+
+    assert "const RUNTIME_CONFIG_SCHEMA_VERSION = '2026-05-22';" in source
+    assert "runtime_schema_version: RUNTIME_CONFIG_SCHEMA_VERSION" in payload_body
+    assert "runtime_schema_version: payload.runtime_schema_version" in interactive_body
+    assert "profile_model_id: payload.profile_model_id" in interactive_body
+    assert "profile_prompt_version: payload.profile_prompt_version" in interactive_body
+    assert "runtime_schema_version: RUNTIME_CONFIG_SCHEMA_VERSION" in snapshot_body
+    assert "schema_version: RUNTIME_CONFIG_SCHEMA_VERSION" in snapshot_body
+    assert "currentTime: payload.context.currentTime || ''" in snapshot_body
+    assert "'完整时间信息': payload.context['完整时间信息'] || ''" in snapshot_body
+    assert "moments: payload.modules.moments || ''" in snapshot_body
+    assert "monthly_schedule: payload.modules.monthly_schedule || ''" in snapshot_body
+    assert "model_ids: Array.isArray(payload.model_ids) && payload.model_ids.length" in snapshot_body
+    assert "compare_mode: payload.compare_mode || ''" in snapshot_body
+    assert "profile_model_id: payload.profile_model_id || ''" in snapshot_body
+    assert "profile_prompt_version: payload.profile_prompt_version || ''" in snapshot_body
+    assert "auto_scoring: payload.auto_scoring !== false" in snapshot_body

@@ -1,6 +1,7 @@
 /* ═══ 工具函数 ═══ */
 const $ = id => document.getElementById(id);
 const escapeHtml = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+const escapeInlineJsString = value => String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
 const DEFAULT_SUMMARY_INTERVAL = 5;
 const DEFAULT_INJECTION_DEPTH = 4;
 const DEFAULT_PRIMARY_MODEL_ID = 'gemma4-31b-local';
@@ -11,11 +12,13 @@ const DEFAULT_AI_SUMMARY_REPORT_MODEL_ID = 'qwen-plus';
 const DEFAULT_SCORING_CONCURRENCY = 2;
 const DEFAULT_SCORING_RETRY_COUNT = 3;
 const DEFAULT_LOW_SCORE_THRESHOLD = 6.0;
+const RUNTIME_CONFIG_SCHEMA_VERSION = '2026-05-22';
 const MAX_BATCH_CONCURRENCY = 24;
 const AB_BATCH_BRANCHES_PER_ROLE = 2;
 const DEFAULT_AB_BATCH_ROLE_CONCURRENCY = 1;
 const MAX_AB_BATCH_ROLE_CONCURRENCY = Math.max(1, Math.floor(MAX_BATCH_CONCURRENCY / AB_BATCH_BRANCHES_PER_ROLE));
 const TEST_CENTER_NAV_STORAGE_KEY = 'longformTestCenterNavState';
+const FREECHAT_RETURN_STORAGE_KEY = 'longformFreeChatReturnAvailable';
 const AI_OUTPUT_DISPLAY_STORAGE_KEY = 'longformAiOutputDisplayMode';
 const AI_OUTPUT_DISPLAY_DEFAULT = 'raw';
 const DEFAULT_VOICE_FORBIDDEN = '当前为文字聊天场景，禁止输出任何语音条、语音时长、语音播报提示或"发语音给你"这类表述；只能用文字叙事和对白完成互动。';
@@ -548,11 +551,17 @@ let state = {
   scoreData: null,
   scoreMeta: null,
   scoreSummary: null,
+  scoreDiagnostics: null,
+  scoreDiagnosticsConversationId: '',
+  scoreClusterFilter: '',
   scoreWs: null,
   compareReportId: '',
   ws: null,
   running: false,
   historyItems: [],
+  historyTab: 'conversations',
+  runHistoryItems: [],
+  runHistoryLoaded: false,
   historyCompareSelection: [],
   presetItems: [],
   chatSessionMode: 'idle',
@@ -589,6 +598,7 @@ let _activeChatPromptFilename = '';
 let _runtimePromptListings = { summary: null, scoring: null, profile: null };
 let _promptManagerKind = 'chat';
 let compareThinkingByModel = {};
+let compareVariantMode = 'models';
 let _runtimePromptContentCache = new Map();
 const AUTO_GENERATED_PROMPT_VARS = new Set(['currentTime', 'weekDay', '完整时间信息']);
 const RUNTIME_PROMPT_EXTRA_KEYS = ['moments', 'monthly_schedule', 'last_cst_type', '完整时间信息'];
@@ -682,6 +692,9 @@ function isGemmaThinkingDefaultModel(modelId = '') {
 }
 
 function getDefaultThinkingEffortForModel(modelId = '') {
+  const caps = _modelCapabilities[String(modelId || '').trim()];
+  const capabilityDefault = String(caps?.default_thinking_effort || '').trim().toLowerCase();
+  if (capabilityDefault && THINKING_EFFORT_OPTIONS.has(capabilityDefault)) return capabilityDefault;
   return isGemmaThinkingDefaultModel(modelId)
     ? GEMMA_DEFAULT_THINKING_EFFORT
     : DEFAULT_THINKING_EFFORT;
@@ -691,6 +704,45 @@ function normalizeThinkingEffortOption(value, fallback = DEFAULT_THINKING_EFFORT
   const normalized = String(value || '').trim().toLowerCase();
   if (THINKING_EFFORT_OPTIONS.has(normalized)) return normalized;
   return THINKING_EFFORT_OPTIONS.has(fallback) ? fallback : DEFAULT_THINKING_EFFORT;
+}
+
+function getThinkingEffortOptionsForModel(modelId = '') {
+  const caps = _modelCapabilities[String(modelId || '').trim()];
+  const rawOptions = Array.isArray(caps?.thinking_efforts)
+    ? caps.thinking_efforts
+    : Array.from(THINKING_EFFORT_OPTIONS);
+  const options = [];
+  rawOptions.forEach(item => {
+    const normalized = normalizeThinkingEffortOption(item, '');
+    if (normalized && !options.includes(normalized)) options.push(normalized);
+  });
+  if (!options.includes('disabled')) options.unshift('disabled');
+  return options.length ? options : ['disabled'];
+}
+
+function getThinkingEffortLabel(effort = '') {
+  const normalized = normalizeThinkingEffortOption(effort, 'disabled');
+  if (normalized === 'disabled') return '思考关';
+  if (normalized === 'low') return '思考低';
+  if (normalized === 'medium') return '思考中';
+  if (normalized === 'high') return '思考高';
+  if (normalized === 'max') return '思考Max';
+  return `思考${normalized}`;
+}
+
+function renderThinkingEffortOptions(select, modelId = '', selected = '') {
+  if (!select) return;
+  const options = getThinkingEffortOptionsForModel(modelId);
+  const preferred = normalizeThinkingEffortOption(
+    selected || select.value || getDefaultThinkingEffortForModel(modelId),
+    getDefaultThinkingEffortForModel(modelId),
+  );
+  select.innerHTML = options.map(option => (
+    `<option value="${escapeHtml(option)}">${escapeHtml(getThinkingEffortLabel(option))}</option>`
+  )).join('');
+  select.value = options.includes(preferred)
+    ? preferred
+    : (options.find(option => option !== 'disabled') || 'disabled');
 }
 
 function coerceOptionalBoolean(value) {
@@ -711,23 +763,27 @@ function modelSupportsThinking(modelId = '') {
 function resolveThinkingPayload(modelId = '', enabled = true, effort = '') {
   const supported = modelSupportsThinking(modelId);
   const fallbackEffort = getDefaultThinkingEffortForModel(modelId);
+  const allowedEfforts = getThinkingEffortOptionsForModel(modelId);
   const normalizedEffort = normalizeThinkingEffortOption(
     effort || fallbackEffort,
     fallbackEffort,
   );
+  const resolvedEffort = allowedEfforts.includes(normalizedEffort)
+    ? normalizedEffort
+    : (allowedEfforts.includes(fallbackEffort) ? fallbackEffort : (allowedEfforts.find(item => item !== 'disabled') || 'disabled'));
   if (!supported || !enabled) {
     return {
       supported,
       enabled: false,
-      effort: normalizedEffort,
+      effort: resolvedEffort,
       thinking_effort: 'disabled',
     };
   }
   return {
     supported,
     enabled: true,
-    effort: normalizedEffort,
-    thinking_effort: normalizedEffort,
+    effort: resolvedEffort,
+    thinking_effort: resolvedEffort,
   };
 }
 
@@ -761,8 +817,10 @@ function getCompareThinkingState(modelId = '') {
   if (override?.touched) {
     return resolveThinkingPayload(normalizedModelId, !!override.enabled, override.effort || DEFAULT_THINKING_EFFORT);
   }
-  const base = getDialogueThinkingState(normalizedModelId || getPrimaryModelId());
-  return resolveThinkingPayload(normalizedModelId, base.enabled, base.effort || base.thinking_effort);
+  if (modelSupportsThinking(normalizedModelId)) {
+    return resolveThinkingPayload(normalizedModelId, true, getDefaultThinkingEffortForModel(normalizedModelId));
+  }
+  return resolveThinkingPayload(normalizedModelId, false, 'disabled');
 }
 
 function formatCompareThinkingLabel(modelId = '') {
@@ -783,9 +841,52 @@ function setCompareThinkingOverride(modelId = '', effort = 'disabled') {
   );
   compareThinkingByModel[normalizedModelId] = {
     enabled: payload.enabled,
-    effort: normalizedEffort,
+    effort: payload.effort || normalizedEffort,
     touched: true,
   };
+}
+
+function handleChatInputKey(event, sendHandler) {
+  if (event.defaultPrevented) return;
+  if (event.key !== 'Enter' || event.isComposing) return;
+  if (event.ctrlKey) {
+    const target = event.target;
+    if (!target || typeof target.value !== 'string') return;
+    event.preventDefault();
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    target.value = `${target.value.slice(0, start)}\n${target.value.slice(end)}`;
+    target.selectionStart = target.selectionEnd = start + 1;
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+  event.preventDefault();
+  if (typeof sendHandler === 'function') sendHandler();
+}
+
+function bindChatEnterShortcuts() {
+  const bindings = [
+    ['chat-input', () => sendChatMessage()],
+    ['freechat-input', () => sendFreeChat()],
+  ];
+  bindings.forEach(([id, sendHandler]) => {
+    const input = $(id);
+    if (!input || input.dataset.enterShortcutBound === '1') return;
+    input.dataset.enterShortcutBound = '1';
+    input.addEventListener('keydown', (event) => handleChatInputKey(event, sendHandler), true);
+  });
+  const compareTurns = $('compare-turns');
+  if (compareTurns && compareTurns.dataset.compareShortcutBound !== '1') {
+    compareTurns.dataset.compareShortcutBound = '1';
+    compareTurns.addEventListener('keydown', handleCompareTurnsKey, true);
+  }
+}
+
+function handleCompareTurnsKey(event) {
+  if (event.defaultPrevented || event.key !== 'Enter' || event.isComposing) return;
+  if (!(event.ctrlKey || event.metaKey)) return;
+  event.preventDefault();
+  startModelCompare();
 }
 
 function updateCompareThinkingSelect(modelId = '') {
@@ -794,14 +895,25 @@ function updateCompareThinkingSelect(modelId = '') {
     .find(item => item.dataset.modelId === normalizedModelId);
   if (!select) return;
   const payload = getCompareThinkingState(normalizedModelId);
+  renderThinkingEffortOptions(select, normalizedModelId, payload.supported && payload.enabled ? payload.thinking_effort : 'disabled');
+  const row = select.closest('.compare-model-row');
+  const badge = row?.querySelector('.compare-thinking-badge');
   select.disabled = !payload.supported;
   select.title = payload.supported ? '设置该模型的思考模式' : '该模型不支持思考模式';
   select.value = payload.supported && payload.enabled ? payload.thinking_effort : 'disabled';
+  row?.classList.toggle('is-thinking-unsupported', !payload.supported);
+  if (badge) {
+    badge.textContent = payload.supported ? '可调思考' : '无思考参数';
+    badge.classList.toggle('is-muted', !payload.supported);
+  }
 }
 
 function refreshCompareThinkingControls() {
   document.querySelectorAll('select.compare-thinking-select').forEach(select => {
     updateCompareThinkingSelect(select.dataset.modelId || '');
+  });
+  document.querySelectorAll('select.fc-thinking-select').forEach(select => {
+    updateFreeChatSlotThinkingSelect(select.dataset.slotKey || '');
   });
   refreshTestCenterShell();
 }
@@ -812,10 +924,110 @@ function applyCompareThinkingToSelected(effort = 'disabled') {
     showToast('请先选择要设置的模型', 'warning');
     return;
   }
+  let applied = 0;
   checked.forEach(input => {
-    if (modelSupportsThinking(input.value)) setCompareThinkingOverride(input.value, effort);
+    if (modelSupportsThinking(input.value)) {
+      setCompareThinkingOverride(input.value, effort);
+      applied += 1;
+    }
   });
   refreshCompareThinkingControls();
+  if (!applied) showToast('所选模型都不支持思考参数', 'warning');
+}
+
+function setCompareVariantMode(mode = 'models') {
+  compareVariantMode = mode === 'thinking' ? 'thinking' : 'models';
+  const selector = $('compare-variant-mode');
+  if (selector && selector.value !== compareVariantMode) selector.value = compareVariantMode;
+  refreshCompareVariantModeUi();
+  refreshTestCenterShell();
+}
+
+function refreshCompareVariantModeUi() {
+  const hint = $('compare-variant-hint');
+  const bulkActions = $('compare-thinking-bulk-actions');
+  const toggleAll = $('btn-toggle-all-compare');
+  const thinkingMode = compareVariantMode === 'thinking';
+  if (hint) {
+    hint.textContent = thinkingMode
+      ? '选择 1 个支持思考的模型，系统会在同一个对比 Run 中生成“思考关 / 思考高 / 思考Max”三个变体。'
+      : '选择 2 个及以上模型，每个模型使用各自下拉框里的思考设置。';
+  }
+  if (bulkActions) bulkActions.style.display = thinkingMode ? 'none' : 'flex';
+  if (toggleAll) toggleAll.style.display = thinkingMode ? 'none' : 'inline-flex';
+  const selected = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])];
+  if (thinkingMode && selected.length > 1) {
+    selected.slice(1).forEach(input => { input.checked = false; });
+  }
+  syncCompareModelSelectionStates();
+  syncToggleAllBtnText();
+  checkProviderConflicts();
+}
+
+function getCompareThinkingVariantEfforts(modelId = '') {
+  const options = getThinkingEffortOptionsForModel(modelId);
+  const variants = ['disabled', 'high', 'max'].filter(effort => options.includes(effort));
+  if (!variants.includes('disabled')) variants.unshift('disabled');
+  const nonDisabled = variants.filter(effort => effort !== 'disabled');
+  if (!nonDisabled.length) {
+    const fallback = options.find(effort => effort !== 'disabled');
+    if (fallback) variants.push(fallback);
+  }
+  return [...new Set(variants)];
+}
+
+function buildCompareVariantFromInput(input, { effort = null, variantIndex = 0 } = {}) {
+  const modelId = String(input?.value || '').trim();
+  const modelName = input?.dataset?.name || modelId;
+  const provider = input?.dataset?.provider || '';
+  const resolvedEffort = effort === null
+    ? null
+    : normalizeThinkingEffortOption(effort, getDefaultThinkingEffortForModel(modelId));
+  const thinking = resolvedEffort === null
+    ? getCompareThinkingState(modelId)
+    : resolveThinkingPayload(modelId, resolvedEffort !== 'disabled', resolvedEffort);
+  const variantSuffix = resolvedEffort === null ? `model-${variantIndex + 1}` : `thinking-${thinking.thinking_effort}`;
+  const label = resolvedEffort === null
+    ? modelName
+    : `${modelName} / ${getThinkingEffortLabel(thinking.thinking_effort)}`;
+  return {
+    id: modelId,
+    modelId,
+    name: label,
+    label,
+    provider,
+    variantId: `${modelId}::${variantSuffix}`,
+    thinking_enabled: thinking.enabled,
+    thinking_effort: thinking.thinking_effort,
+  };
+}
+
+function getSelectedCompareVariants() {
+  const selected = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])];
+  if (compareVariantMode === 'thinking') {
+    if (selected.length !== 1) {
+      return {
+        ok: false,
+        variants: [],
+        error: selected.length ? '同模型思考对比一次只选择 1 个模型' : '请选择 1 个要测试思考开关的模型',
+      };
+    }
+    const input = selected[0];
+    if (!modelSupportsThinking(input.value)) {
+      return { ok: false, variants: [], error: '该模型不支持思考参数，无法做思考开关对比' };
+    }
+    const variants = getCompareThinkingVariantEfforts(input.value)
+      .map((effort, index) => buildCompareVariantFromInput(input, { effort, variantIndex: index }));
+    if (variants.length < 2) {
+      return { ok: false, variants: [], error: '该模型可用思考档位不足 2 个，无法形成对比' };
+    }
+    return { ok: true, variants };
+  }
+  const variants = selected.map((input, index) => buildCompareVariantFromInput(input, { variantIndex: index }));
+  if (variants.length < 2) {
+    return { ok: false, variants, error: '请至少选择 2 个模型进行对比' };
+  }
+  return { ok: true, variants };
 }
 
 function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '', force = false } = {}) {
@@ -846,6 +1058,7 @@ function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '
   );
   _dialogueThinkingEffortDraft = requestedEffort === 'disabled' ? fallbackEffort : requestedEffort;
   const payload = resolveThinkingPayload(resolvedModelId, nextEnabled, _dialogueThinkingEffortDraft);
+  _dialogueThinkingEffortDraft = payload.effort || _dialogueThinkingEffortDraft;
 
   if (mainEnabled) {
     mainEnabled.checked = payload.enabled;
@@ -853,11 +1066,13 @@ function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '
     mainEnabled.title = payload.supported ? '' : '当前模型不支持思考';
   }
   if (mainEffort) {
+    renderThinkingEffortOptions(mainEffort, resolvedModelId, _dialogueThinkingEffortDraft);
     mainEffort.value = _dialogueThinkingEffortDraft;
     mainEffort.disabled = !payload.supported;
     mainEffort.title = payload.supported ? '' : '当前模型不支持思考';
   }
   if (dockEffort) {
+    renderThinkingEffortOptions(dockEffort, resolvedModelId, payload.supported ? (payload.enabled ? _dialogueThinkingEffortDraft : 'disabled') : 'disabled');
     dockEffort.value = payload.supported
       ? (payload.enabled ? _dialogueThinkingEffortDraft : 'disabled')
       : 'disabled';
@@ -865,6 +1080,7 @@ function syncDialogueThinkingControls({ enabled = null, effort = '', modelId = '
     dockEffort.title = payload.supported ? '' : '当前模型不支持思考';
   }
   if (freeEffort) {
+    renderThinkingEffortOptions(freeEffort, resolvedModelId, payload.supported ? (payload.enabled ? _dialogueThinkingEffortDraft : 'disabled') : 'disabled');
     freeEffort.value = payload.supported
       ? (payload.enabled ? _dialogueThinkingEffortDraft : 'disabled')
       : 'disabled';
@@ -897,6 +1113,7 @@ function syncScoringThinkingControls({ enabled = null, effort = '', modelId = ''
   );
   _scoringThinkingEffortDraft = requestedEffort === 'disabled' ? fallbackEffort : requestedEffort;
   const payload = resolveThinkingPayload(resolvedModelId, nextEnabled, _scoringThinkingEffortDraft);
+  _scoringThinkingEffortDraft = payload.effort || _scoringThinkingEffortDraft;
 
   if (checkbox) {
     checkbox.checked = payload.enabled;
@@ -904,6 +1121,7 @@ function syncScoringThinkingControls({ enabled = null, effort = '', modelId = ''
     checkbox.title = payload.supported ? '' : '当前模型不支持思考';
   }
   if (select) {
+    renderThinkingEffortOptions(select, resolvedModelId, _scoringThinkingEffortDraft);
     select.value = _scoringThinkingEffortDraft;
     select.disabled = !payload.supported;
     select.title = payload.supported ? '' : '当前模型不支持思考';
@@ -1048,6 +1266,7 @@ function onChatThinkingEffortChange() {
     modelId: getPrimaryModelId(),
     force: true,
   });
+  refreshCompareThinkingControls();
 }
 
 function normalizeInjectionDepthValue(value) {
@@ -1988,12 +2207,14 @@ function switchPage(name, { persist = true } = {}) {
   if (target) target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => {
     n.classList.toggle('active', n.dataset.page === name || (name === 'freechat' && n.dataset.page === 'chat'));
+    const selected = n.dataset.page === name || (name === 'freechat' && n.dataset.page === 'chat');
+    n.setAttribute('aria-pressed', selected ? 'true' : 'false');
   });
   if (persist && target) {
     persistTestCenterNavigationState({ page: name });
   }
   syncPageChrome(name);
-  if (name === 'history') loadHistory();
+  if (name === 'history') loadActiveHistoryTab();
   if (name === 'prompts') loadPrompts();
   if (name === 'test-center') refreshTestCenterShell();
 }
@@ -2041,6 +2262,7 @@ function clearCompareModelSelection() {
   $('compare-model-checkboxes')?.querySelectorAll('input[type="checkbox"]').forEach(input => {
     input.checked = false;
   });
+  syncCompareModelSelectionStates();
   syncToggleAllBtnText();
   checkProviderConflicts();
   refreshTestCenterShell();
@@ -2052,9 +2274,28 @@ function toggleSelectAllCompareModels() {
   const all = [...box.querySelectorAll('input[type="checkbox"]')];
   const allChecked = all.length > 0 && all.every(cb => cb.checked);
   all.forEach(cb => { cb.checked = !allChecked; });
+  syncCompareModelSelectionStates();
   syncToggleAllBtnText();
   checkProviderConflicts();
   refreshTestCenterShell();
+}
+
+function syncCompareModelSelectionStates() {
+  const box = $('compare-model-checkboxes');
+  if (!box) return;
+  const rows = [...box.querySelectorAll('.compare-model-row')];
+  if (compareVariantMode === 'thinking') {
+    const selectedInputs = rows
+      .map(row => row.querySelector('input[type="checkbox"]'))
+      .filter(input => input?.checked);
+    selectedInputs.slice(1).forEach(input => { input.checked = false; });
+  }
+  rows.forEach(row => {
+    const input = row.querySelector('input[type="checkbox"]');
+    const selected = !!input?.checked;
+    row.classList.toggle('is-selected', selected);
+    row.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
 }
 
 function syncToggleAllBtnText() {
@@ -2175,17 +2416,17 @@ function renderTestCenterAdvancedActions(mode) {
 }
 
 function getCompareModelSummaryText() {
-  const selected = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])]
-    .map(input => input.value || input.dataset.name || '')
-    .filter(Boolean);
-  return selected.length ? `对比模型: ${selected.join(', ')}` : '';
+  const result = getSelectedCompareVariants();
+  const variants = result.variants || [];
+  return variants.length ? `对比项: ${variants.map(item => item.label || item.name || item.modelId).join(', ')}` : '';
 }
 
 function getCompareThinkingSummaryText() {
-  const selected = [...($('compare-model-checkboxes')?.querySelectorAll('input:checked') || [])]
-    .map(input => `${input.dataset.name || input.value}: ${formatCompareThinkingLabel(input.value)}`)
-    .filter(Boolean);
-  return selected.length ? `模型思考: ${selected.join(' / ')}` : '';
+  const result = getSelectedCompareVariants();
+  const variants = result.variants || [];
+  return variants.length
+    ? `模型思考: ${variants.map(item => `${item.label || item.modelId}: ${getThinkingEffortLabel(item.thinking_effort)}`).join(' / ')}`
+    : '';
 }
 
 function refreshTestCenterShell() {
@@ -2257,10 +2498,15 @@ function switchTestCenterMode(mode, { refreshShell = true, persist = true } = {}
     persistTestCenterNavigationState({ testMode: mode });
   }
   document.querySelectorAll('#page-test-center .test-mode-card').forEach(card => {
-    card.classList.toggle('active', card.id === `tc-mode-${mode}`);
+    const selected = card.id === `tc-mode-${mode}`;
+    card.classList.toggle('active', selected);
+    card.setAttribute('aria-selected', selected ? 'true' : 'false');
+    card.setAttribute('tabindex', selected ? '0' : '-1');
   });
   document.querySelectorAll('#page-test-center .tc-tab-content').forEach(content => {
-    content.classList.toggle('active', content.id === `tc-tab-${mode}`);
+    const selected = content.id === `tc-tab-${mode}`;
+    content.classList.toggle('active', selected);
+    content.setAttribute('aria-hidden', selected ? 'false' : 'true');
   });
   if (refreshShell) refreshTestCenterShell();
 }
@@ -2404,6 +2650,7 @@ function getSignatureCustomVariables(customVariables = {}) {
 function buildInteractiveConversationPayload() {
   const payload = buildConversationRunPayload();
   return {
+    runtime_schema_version: payload.runtime_schema_version,
     model_id: payload.model_id,
     model_mini: payload.model_mini,
     scoring_model_id: payload.scoring_model_id,
@@ -2416,6 +2663,8 @@ function buildInteractiveConversationPayload() {
     prompt_version: payload.prompt_version,
     summary_prompt_version: payload.summary_prompt_version,
     scoring_prompt_version: payload.scoring_prompt_version,
+    profile_model_id: payload.profile_model_id,
+    profile_prompt_version: payload.profile_prompt_version,
     summary_interval: payload.summary_interval,
     injection_depth: payload.injection_depth,
     temperature: payload.temperature,
@@ -2531,6 +2780,7 @@ function buildConversationRunPayload(cfg = null, {
   );
 
   return {
+    runtime_schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
     model_id: resolvedModelId,
     model_ids: resolvedModelIds.length ? resolvedModelIds : (resolvedModelId ? [resolvedModelId] : []),
     compare_mode: compareMode || undefined,
@@ -2595,6 +2845,7 @@ function buildConfigSnapshotRequest(name, type = 'quick_chat') {
     name,
     type,
     config: {
+      runtime_schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
       prompt_file: payload.prompt_version || '',
       character: {
         ...payload.character,
@@ -2604,6 +2855,16 @@ function buildConfigSnapshotRequest(name, type = 'quick_chat') {
         current_scene: payload.context.scene || '',
         timeperiod: payload.context.time_period || '',
         season: payload.context.season || '',
+        currentTime: payload.context.currentTime || '',
+        weekDay: payload.context.weekDay || '',
+        '完整时间信息': payload.context['完整时间信息'] || '',
+        last_cst_type: payload.context.last_cst_type || '',
+        intimacy_boundary: payload.context.intimacy_boundary || '',
+        relation_calling: payload.context.relation_calling || '',
+        relation_info: payload.context.relation_info || '',
+        user_nickname: payload.context.user_nickname || '',
+        user_gender: payload.context.user_gender || '',
+        user_identity: payload.context.user_identity || '',
       },
       modules: {
         user_Nickname: payload.context.user_nickname || '',
@@ -2615,6 +2876,8 @@ function buildConfigSnapshotRequest(name, type = 'quick_chat') {
         longform_few_shot: payload.modules.longform_few_shot || '',
         dialogueStartPrompt: payload.modules.dialogueStartPrompt || '',
         dialogue_summary: payload.modules.dialogue_summary || '',
+        moments: payload.modules.moments || '',
+        monthly_schedule: payload.modules.monthly_schedule || '',
         weekly_schedule: payload.modules.weekly_schedule || '',
         system_module8: payload.modules.system_module8 || '',
         system_Role_acting: payload.modules.system_Role_acting || '',
@@ -2623,7 +2886,11 @@ function buildConfigSnapshotRequest(name, type = 'quick_chat') {
       },
       few_shot_file: payload.few_shot_file || payload.modules.longform_few_shot || '',
       runtime: {
-        model_ids: payload.model_id ? [payload.model_id] : [],
+        schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
+        model_ids: Array.isArray(payload.model_ids) && payload.model_ids.length
+          ? payload.model_ids
+          : (payload.model_id ? [payload.model_id] : []),
+        compare_mode: payload.compare_mode || '',
         model_mini: payload.model_mini || '',
         scoring_model_id: payload.scoring_model_id || payload.model_id || '',
         thinking_enabled: payload.thinking_enabled,
@@ -2639,6 +2906,9 @@ function buildConfigSnapshotRequest(name, type = 'quick_chat') {
         prompt_version: payload.prompt_version || '',
         summary_prompt_version: payload.summary_prompt_version || '',
         scoring_prompt_version: payload.scoring_prompt_version || '',
+        profile_model_id: payload.profile_model_id || '',
+        profile_prompt_version: payload.profile_prompt_version || '',
+        auto_scoring: payload.auto_scoring !== false,
       },
       custom_variables: payload.custom_variables || {},
     },
@@ -2923,7 +3193,7 @@ async function fillModelSelect(selectId, tier) {
   const models = data.models || data || [];
   const sel = $(selectId); sel.innerHTML = '';
   models.forEach(m => {
-    const o = document.createElement('option'); o.value = m.id || m; o.textContent = m.name || m.id || m; sel.appendChild(o);
+    const o = document.createElement('option'); o.value = m.id || m; o.textContent = m.display_name || m.name || m.id || m; sel.appendChild(o);
   });
   return models;
 }
@@ -2950,7 +3220,7 @@ async function fetchModels() {
     const allModels = allData.models || allData || [];
     _allModelOptions = allModels.map(m => ({
       id: m.id || m,
-      name: m.name || m.id || m,
+      name: m.display_name || m.name || m.id || m,
       provider: m.provider || '',
       capabilities: m.capabilities || {},
     }));
@@ -4119,6 +4389,233 @@ function refreshScoreSummary() {
   }
 }
 
+function normalizeScoringDiagnostics(source = {}) {
+  const summary = source.summary || {};
+  return {
+    evidence_chain: Array.isArray(source.evidence_chain)
+      ? source.evidence_chain
+      : (Array.isArray(summary.evidence_chain) ? summary.evidence_chain : []),
+    failure_diagnostics: source.failure_diagnostics || summary.failure_diagnostics || {
+      status_counts: {},
+      failure_types: [],
+    },
+    low_score_clusters: Array.isArray(source.low_score_clusters)
+      ? source.low_score_clusters
+      : (Array.isArray(summary.low_score_clusters) ? summary.low_score_clusters : []),
+  };
+}
+
+function getDimensionLabel(key) {
+  const index = DIM_KEYS.indexOf(String(key || ''));
+  return index >= 0 ? DIM_NAMES[index] : String(key || '未知维度');
+}
+
+function getFailureTypeLabel(type) {
+  const labels = {
+    parse_error: '解析失败',
+    timeout: '请求超时',
+    upstream_error: '模型/上游错误',
+    rate_limited: '触发限流',
+    skipped_empty_output: '空输出跳过',
+    skipped: '已跳过',
+    scoring_failed: '打分失败',
+    pending_scoring: '未完成打分',
+    no_score_result: '缺少打分结果',
+  };
+  return labels[String(type || '')] || String(type || '未知失败');
+}
+
+function buildStatusCountPills(statusCounts = {}) {
+  const order = [
+    ['scored', '已打分'],
+    ['failed', '失败'],
+    ['unscored', '未完成'],
+    ['pending', '等待中'],
+  ];
+  return order
+    .filter(([key]) => Number(statusCounts[key] || 0) > 0)
+    .map(([key, label]) => `<span class="status-badge status-${key}">${label} ${Number(statusCounts[key] || 0)}</span>`)
+    .join('');
+}
+
+function renderFailureDiagnostics(failureDiagnostics = {}, { interactive = true } = {}) {
+  const failureTypes = Array.isArray(failureDiagnostics.failure_types)
+    ? failureDiagnostics.failure_types
+    : [];
+  if (!failureTypes.length) {
+    return '<div class="score-diagnostic-empty">暂无失败项。</div>';
+  }
+  return failureTypes.map(item => {
+    const turns = Array.isArray(item.turns) ? item.turns : [];
+    const firstTurn = turns[0] || '';
+    const tag = interactive ? 'button' : 'div';
+    const attrs = interactive ? ` type="button" data-turn="${escapeHtml(firstTurn)}"` : '';
+    return `<${tag} class="score-diagnostic-row"${attrs}>
+      <span><strong>${escapeHtml(getFailureTypeLabel(item.type))}</strong><small>${escapeHtml(item.sample_reasoning || '暂无失败摘要')}</small></span>
+      <span class="score-diagnostic-count">${Number(item.count || turns.length || 0)} 项</span>
+    </${tag}>`;
+  }).join('');
+}
+
+function renderLowScoreClusters(lowScoreClusters = [], { interactive = true } = {}) {
+  if (!Array.isArray(lowScoreClusters) || !lowScoreClusters.length) {
+    return '<div class="score-diagnostic-empty">暂无低分聚类。</div>';
+  }
+  return lowScoreClusters.map(item => {
+    const cluster = String(item.cluster || '');
+    const isActive = state.scoreClusterFilter === cluster;
+    const turns = Array.isArray(item.turns) ? item.turns : [];
+    const tag = interactive ? 'button' : 'div';
+    const attrs = interactive ? ` type="button" data-cluster="${escapeHtml(cluster)}"` : '';
+    return `<${tag} class="score-cluster-card${isActive && interactive ? ' active' : ''}"${attrs}>
+      <span class="score-cluster-title">${escapeHtml(getDimensionLabel(cluster))}</span>
+      <span class="score-cluster-meta">${Number(item.count || turns.length || 0)} 轮 · 均分 ${toFixedScore(item.avg_total, 0)} · 维度 ${toFixedScore(item.avg_dimension_score, 0)}</span>
+      <span class="score-cluster-turns">Turn ${escapeHtml(turns.slice(0, 6).join(', ') || '-')}</span>
+    </${tag}>`;
+  }).join('');
+}
+
+function renderScoreEvidenceChain(evidence = {}, { interactive = true } = {}) {
+  const rows = Array.isArray(evidence) ? evidence : [evidence];
+  const usefulRows = rows.filter(item => item && typeof item === 'object');
+  if (!usefulRows.length) {
+    return '<div class="score-evidence-chain is-empty">暂无结构化证据。</div>';
+  }
+  return `<div class="score-evidence-chain">
+    <div class="score-evidence-title">证据链</div>
+    ${usefulRows.map(item => {
+      const weakest = Array.isArray(item.weakest_dimensions) ? item.weakest_dimensions : [];
+      const weakestHtml = weakest.length
+        ? weakest.map(row => `<span class="score-evidence-chip">${escapeHtml(getDimensionLabel(row.dimension))} ${toFixedScore(row.score, 0)}</span>`).join('')
+        : '<span class="score-evidence-muted">暂无低维度证据</span>';
+      const failureHtml = item.failure_type
+        ? `<span class="score-evidence-chip is-danger">${escapeHtml(getFailureTypeLabel(item.failure_type))}</span>`
+        : '';
+      const tag = interactive ? 'button' : 'div';
+      const attrs = interactive ? ` type="button" data-turn="${escapeHtml(item.turn || '')}"` : '';
+      return `<${tag} class="score-evidence-item"${attrs}>
+        <div class="score-evidence-meta">Turn ${escapeHtml(item.turn || '-')} · ${escapeHtml(item.status || 'unknown')} ${failureHtml}</div>
+        <div class="score-evidence-chips">${weakestHtml}</div>
+        ${item.reasoning_excerpt ? `<div class="score-evidence-excerpt">${escapeHtml(item.reasoning_excerpt)}</div>` : ''}
+      </${tag}>`;
+    }).join('')}
+  </div>`;
+}
+
+function buildScoringDiagnosticsHtml(diagnostics = {}, { compact = false, interactive = true } = {}) {
+  const failureDiagnostics = diagnostics.failure_diagnostics || {};
+  const statusCounts = failureDiagnostics.status_counts || {};
+  const lowScoreClusters = Array.isArray(diagnostics.low_score_clusters) ? diagnostics.low_score_clusters : [];
+  const evidenceChain = Array.isArray(diagnostics.evidence_chain) ? diagnostics.evidence_chain : [];
+  const evidencePreview = evidenceChain
+    .filter(item => item.failure_type || (Array.isArray(item.weakest_dimensions) && item.weakest_dimensions.length))
+    .slice(0, compact ? 3 : 6);
+  const filterNote = state.scoreClusterFilter
+    ? `<button class="score-filter-clear" type="button" data-clear-cluster="1">清除筛选：${escapeHtml(getDimensionLabel(state.scoreClusterFilter))}</button>`
+    : '';
+  const interactionClass = interactive ? '' : ' is-readonly';
+  return `<div class="score-diagnostics-shell${compact ? ' compact' : ''}${interactionClass}">
+    <div class="score-diagnostics-header">
+      <div>
+        <div class="score-diagnostics-title">评分证据与失败诊断</div>
+        <div class="score-diagnostics-subtitle">按失败类型、低分维度和轮次证据定位问题。</div>
+      </div>
+      <div class="score-diagnostics-status">${buildStatusCountPills(statusCounts) || '<span class="status-badge status-queued">暂无状态计数</span>'}</div>
+    </div>
+    ${filterNote}
+    <div class="score-diagnostics-grid">
+      <section class="score-diagnostic-section" aria-label="低分聚类">
+        <div class="score-diagnostic-section-title">低分聚类</div>
+        <div class="score-cluster-list">${renderLowScoreClusters(lowScoreClusters, { interactive })}</div>
+      </section>
+      <section class="score-diagnostic-section" aria-label="失败诊断">
+        <div class="score-diagnostic-section-title">失败诊断</div>
+        <div class="score-failure-list">${renderFailureDiagnostics(failureDiagnostics, { interactive })}</div>
+      </section>
+    </div>
+    <section class="score-diagnostic-section" aria-label="证据链预览">
+      <div class="score-diagnostic-section-title">证据链预览</div>
+      ${renderScoreEvidenceChain(evidencePreview, { interactive })}
+    </section>
+  </div>`;
+}
+
+function attachScoringDiagnosticHandlers(container, { interactive = true } = {}) {
+  if (!container) return;
+  if (!interactive) return;
+  container.querySelectorAll('.score-cluster-card').forEach(button => {
+    button.addEventListener('click', () => setScoreClusterFilter(button.dataset.cluster || ''));
+  });
+  container.querySelectorAll('[data-clear-cluster]').forEach(button => {
+    button.addEventListener('click', () => clearScoreClusterFilter());
+  });
+  container.querySelectorAll('.score-diagnostic-row[data-turn]').forEach(button => {
+    button.addEventListener('click', () => jumpToScoreEvidenceTurn(button.dataset.turn));
+  });
+  container.querySelectorAll('.score-evidence-item[data-turn]').forEach(button => {
+    button.addEventListener('click', () => jumpToScoreEvidenceTurn(button.dataset.turn));
+  });
+}
+
+function renderScoringDiagnostics(diagnostics = state.scoreDiagnostics || {}) {
+  const container = $('scoring-diagnostics');
+  if (!container) return;
+  const normalized = normalizeScoringDiagnostics(diagnostics);
+  const hasData = normalized.evidence_chain.length
+    || normalized.low_score_clusters.length
+    || Object.keys(normalized.failure_diagnostics?.status_counts || {}).length;
+  container.style.display = hasData ? 'block' : 'none';
+  if (!hasData) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = buildScoringDiagnosticsHtml(normalized);
+  attachScoringDiagnosticHandlers(container, { interactive: true });
+}
+
+function renderAiSummaryDiagnostics(summary = {}) {
+  const container = $('ai-summary-diagnostics');
+  if (!container) return;
+  const normalized = normalizeScoringDiagnostics(summary);
+  const hasData = normalized.evidence_chain.length
+    || normalized.low_score_clusters.length
+    || Object.keys(normalized.failure_diagnostics?.status_counts || {}).length;
+  container.style.display = hasData ? 'block' : 'none';
+  container.innerHTML = hasData ? buildScoringDiagnosticsHtml(normalized, { compact: true, interactive: false }) : '';
+  attachScoringDiagnosticHandlers(container, { interactive: false });
+}
+
+function jumpToScoreEvidenceTurn(turn, { expand = true } = {}) {
+  const turnNumber = Number.parseInt(String(turn || ''), 10);
+  if (!Number.isFinite(turnNumber) || turnNumber <= 0) return;
+  const card = document.querySelector(`#score-cards .score-turn-card[data-turn="${turnNumber}"]`);
+  if (!card) {
+    showToast(`当前筛选下未显示 Turn ${turnNumber}`, 'warning');
+    return;
+  }
+  if (expand) card.classList.add('expanded');
+  document.querySelectorAll('#score-cards .score-turn-card.low-score-active')
+    .forEach(node => node.classList.remove('low-score-active'));
+  card.classList.add('low-score-active');
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function setScoreClusterFilter(clusterKey) {
+  state.scoreClusterFilter = String(clusterKey || '').trim();
+  renderScoreCards();
+  renderScoringDiagnostics();
+  const cluster = (state.scoreDiagnostics?.low_score_clusters || [])
+    .find(item => String(item.cluster || '') === state.scoreClusterFilter);
+  const firstTurn = Array.isArray(cluster?.turns) ? cluster.turns[0] : null;
+  if (firstTurn) setTimeout(() => jumpToScoreEvidenceTurn(firstTurn), 0);
+}
+
+function clearScoreClusterFilter() {
+  state.scoreClusterFilter = '';
+  renderScoreCards();
+  renderScoringDiagnostics();
+}
+
 function renderScoringMeta() {
   const meta = state.scoreMeta || {};
   const chipWrap = $('scoring-meta-chips');
@@ -4145,7 +4642,16 @@ function renderScoreCards() {
   const container = $('score-cards');
   if (!container) return;
   container.innerHTML = '';
-  (state.scoreData || []).forEach((score, index) => renderScoreCard(score, index + 1));
+  const rows = (state.scoreData || []).filter(score => {
+    if (!state.scoreClusterFilter) return true;
+    return Array.isArray(score._low_score_clusters)
+      && score._low_score_clusters.includes(state.scoreClusterFilter);
+  });
+  if (!rows.length && state.scoreClusterFilter) {
+    container.innerHTML = `<div class="score-filter-empty">当前没有匹配「${escapeHtml(getDimensionLabel(state.scoreClusterFilter))}」的评分轮次。</div>`;
+  } else {
+    rows.forEach((score, index) => renderScoreCard(score, score.turn || index + 1));
+  }
   refreshScoreSummary();
 }
 
@@ -4170,22 +4676,60 @@ function buildConversationReportMeta(data = {}) {
 
 function applyConversationScoreResults(data = {}) {
   if (!data || typeof data !== 'object') return null;
+  const conversationId = String(data.conversation_id || state.convId || '').trim();
+  if (
+    state.scoreDiagnosticsConversationId
+    && conversationId
+    && state.scoreDiagnosticsConversationId !== conversationId
+  ) {
+    state.scoreClusterFilter = '';
+  }
+  if (conversationId) state.scoreDiagnosticsConversationId = conversationId;
   state.scoreMeta = data.meta || null;
   state.scoreSummary = data.summary || null;
+  const diagnostics = normalizeScoringDiagnostics(data);
+  state.scoreDiagnostics = diagnostics;
+  const validClusters = new Set(diagnostics.low_score_clusters.map(item => String(item?.cluster || '').trim()).filter(Boolean));
+  if (state.scoreClusterFilter && !validClusters.has(state.scoreClusterFilter)) {
+    state.scoreClusterFilter = '';
+  }
+  const evidenceByTurn = new Map();
+  diagnostics.evidence_chain.forEach(item => {
+    const turn = Number.parseInt(String(item?.turn || ''), 10);
+    if (Number.isFinite(turn)) evidenceByTurn.set(turn, item);
+  });
+  const clustersByTurn = new Map();
+  diagnostics.low_score_clusters.forEach(item => {
+    const cluster = String(item?.cluster || '').trim();
+    if (!cluster) return;
+    (Array.isArray(item.turns) ? item.turns : []).forEach(turnValue => {
+      const turn = Number.parseInt(String(turnValue || ''), 10);
+      if (!Number.isFinite(turn)) return;
+      const current = clustersByTurn.get(turn) || [];
+      current.push(cluster);
+      clustersByTurn.set(turn, current);
+    });
+  });
   const turns = Array.isArray(data.turns) ? data.turns : [];
-  state.scoreData = turns.map(item => ({
-    ...item.scores,
-    total: item.total,
-    reasoning: item.reasoning,
-    status: item.status,
-    manual_star_score: item.manual_star_score,
-    manual_comment: item.manual_comment,
-  }));
+  state.scoreData = turns.map((item, index) => {
+    const turnNumber = Number.parseInt(String(item.turn || index + 1), 10) || (index + 1);
+    return {
+      ...item.scores,
+      turn: turnNumber,
+      total: item.total,
+      reasoning: item.reasoning,
+      status: item.status,
+      manual_star_score: item.manual_star_score,
+      manual_comment: item.manual_comment,
+      _evidence: evidenceByTurn.get(turnNumber) || null,
+      _low_score_clusters: clustersByTurn.get(turnNumber) || [],
+    };
+  });
   turns.forEach(item => updateTurnManualState(item.turn, item.manual_star_score, item.manual_comment || ''));
   renderScoreCards();
   renderScoringMeta();
+  renderScoringDiagnostics();
 
-  const conversationId = String(data.conversation_id || state.convId || '').trim();
   const avgTotal = Number(data?.summary?.avg_total);
   if (conversationId) {
     const reportMeta = buildConversationReportMeta(data);
@@ -4531,6 +5075,46 @@ function filterHistoryItems(items) {
 
 function renderHistoryWithCurrentFilters() {
   renderHistory(filterHistoryItems(state.historyItems || []));
+}
+
+function switchHistoryTab(tab = 'conversations') {
+  const normalized = tab === 'runs' ? 'runs' : 'conversations';
+  state.historyTab = normalized;
+  const tabs = {
+    conversations: $('history-tab-conversations'),
+    runs: $('history-tab-runs'),
+  };
+  const panels = {
+    conversations: $('history-conversations-panel'),
+    runs: $('history-runs-panel'),
+  };
+  Object.entries(tabs).forEach(([key, button]) => {
+    if (!button) return;
+    const selected = key === normalized;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    button.setAttribute('tabindex', selected ? '0' : '-1');
+  });
+  Object.entries(panels).forEach(([key, panel]) => {
+    if (!panel) return;
+    const selected = key === normalized;
+    panel.style.display = selected ? '' : 'none';
+    panel.setAttribute('aria-hidden', selected ? 'false' : 'true');
+  });
+  if (normalized === 'runs') {
+    loadRunHistory({ force: !state.runHistoryLoaded }).catch(err => {
+      console.warn('Run 历史加载失败:', err);
+    });
+  }
+}
+
+function loadActiveHistoryTab() {
+  if ((state.historyTab || 'conversations') === 'runs') {
+    switchHistoryTab('runs');
+    return;
+  }
+  switchHistoryTab('conversations');
+  loadHistory();
 }
 
 function setScoreQuickFilter(val) {
@@ -5197,7 +5781,7 @@ async function fetchConversationScoreResults(convId) {
   return data;
 }
 
-function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = false } = {}) {
+function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = false, actionOverride = '' } = {}) {
   if (forceFullRescore) {
     return {
       action: 'rescore_all',
@@ -5252,6 +5836,8 @@ function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = f
       startedText: '当前会话已有可用评分结果',
     },
   };
+  const forcedAction = String(actionOverride || '').trim().toLowerCase();
+  if (mapping[forcedAction]) return mapping[forcedAction];
   if (mapping[action]) return mapping[action];
 
   const total = Number(summary.total_count || 0);
@@ -5259,8 +5845,8 @@ function getConversationScoringActionMeta(scoreData = {}, { forceFullRescore = f
   const failed = Number(summary.failed_count || 0);
   const skipped = Number(summary.skipped_count || 0);
   const pending = Math.max(0, total - scored - failed - skipped);
+  if (failed > 0) return mapping.retry_failed_turns;
   if (pending > 0 && scored > 0) return mapping.retry_failed_turns;
-  if (pending > 0 && failed > 0) return mapping.rescore_all;
   if (pending > 0) return mapping.start_scoring;
   if (scored > 0) return mapping.view_results;
   return mapping.start_scoring;
@@ -5872,11 +6458,15 @@ function renderHistory(convs) {
   syncHistoryCompareSelection();
   const hasAnyHistory = Array.isArray(state.historyItems) && state.historyItems.length > 0;
   if (!hasAnyHistory) {
-    $('history-empty').style.display = 'block';
-    $('history-content').style.display = 'none';
+    $('history-empty').style.display = 'none';
+    $('history-content').style.display = 'block';
     closeHistoryCompareReport();
     updateHistoryCompareActions();
     renderSidebarHistory([]);
+    const tbody = $('history-tbody');
+    if (tbody) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary);padding:24px">暂无历史对话</td></tr>';
+    }
     return;
   }
   $('history-empty').style.display = 'none';
@@ -6187,6 +6777,115 @@ async function loadHistory() {
   } catch (e) { console.warn('历史加载失败:', e); }
 }
 
+function getRunHistoryLimit() {
+  const value = Number.parseInt(getInputValue('run-history-limit'), 10);
+  if (!Number.isFinite(value)) return 50;
+  return Math.min(200, Math.max(1, value));
+}
+
+function getRunConfigSnapshot(run = {}) {
+  const manifest = getOrchestrationManifest(run);
+  return run.config_snapshot
+    || run.configSnapshot
+    || manifest.config_snapshot
+    || manifest.configSnapshot
+    || manifest.shared_config
+    || manifest.config
+    || {};
+}
+
+function formatRunSummary(run = {}) {
+  const summary = run.summary && typeof run.summary === 'object' ? run.summary : {};
+  const parts = [];
+  const total = Number(summary.total_items ?? summary.total ?? summary.count);
+  const completed = Number(summary.completed_items ?? summary.completed);
+  const failed = Number(summary.failed_items ?? summary.failed);
+  const cancelled = Number(summary.cancelled_items ?? summary.cancelled);
+  const terminal = Number(summary.terminal_items ?? summary.terminal);
+  if (Number.isFinite(total)) parts.push(`总数 ${total}`);
+  if (Number.isFinite(completed)) parts.push(`完成 ${completed}`);
+  if (Number.isFinite(failed) && failed > 0) parts.push(`失败 ${failed}`);
+  if (Number.isFinite(cancelled) && cancelled > 0) parts.push(`取消 ${cancelled}`);
+  if (Number.isFinite(terminal) && Number.isFinite(total)) parts.push(`终态 ${terminal}/${total}`);
+  if (parts.length) return parts.join(' · ');
+  if (Object.keys(summary).length) return JSON.stringify(summary);
+  return '暂无摘要';
+}
+
+function formatRunConfigSnapshot(snapshot = {}) {
+  if (!snapshot || typeof snapshot !== 'object' || !Object.keys(snapshot).length) return '暂无配置快照';
+  try {
+    return JSON.stringify(snapshot, null, 2);
+  } catch (_) {
+    return String(snapshot);
+  }
+}
+
+function renderRunHistory(runs = []) {
+  const list = $('run-history-list');
+  const status = $('run-history-status');
+  if (!list) return;
+  if (!runs.length) {
+    list.innerHTML = '<div class="run-history-empty">暂无 Run 历史。</div>';
+    if (status) status.textContent = '未读取到编排任务。';
+    return;
+  }
+  list.innerHTML = runs.map(run => {
+    const runId = run.id || run.run_id || '';
+    const title = run.title || getOrchestrationManifest(run).title || '未命名 Run';
+    const kind = run.kind || getOrchestrationManifest(run).kind || 'unknown';
+    const statusText = run.status || 'unknown';
+    const createdAt = formatBeijingDateTime(run.created_at || run.started_at || run.updated_at || '') || '';
+    return `
+      <article class="run-history-card">
+        <div class="run-history-card-head">
+          <div>
+            <div class="run-history-card-title">${escapeHtml(title)}</div>
+            <div class="run-history-card-meta">
+              <span class="run-history-id">${escapeHtml(runId || '(无 id)')}</span>
+              <span>${escapeHtml(kind)}</span>
+              ${createdAt ? `<span>${escapeHtml(createdAt)}</span>` : ''}
+            </div>
+          </div>
+          <span class="status-badge status-${escapeHtml(String(statusText).toLowerCase())}">${escapeHtml(getConversationStatusLabel(statusText))}</span>
+        </div>
+        <div class="run-history-summary">${escapeHtml(formatRunSummary(run))}</div>
+        <details class="run-history-snapshot" open>
+          <summary>config_snapshot</summary>
+          <pre>${escapeHtml(formatRunConfigSnapshot(getRunConfigSnapshot(run)))}</pre>
+        </details>
+      </article>
+    `;
+  }).join('');
+  if (status) status.textContent = `已读取 ${runs.length} 条 Run 历史。`;
+}
+
+async function loadRunHistory({ force = false } = {}) {
+  if (state.runHistoryLoaded && !force) {
+    renderRunHistory(state.runHistoryItems || []);
+    return;
+  }
+  const status = $('run-history-status');
+  if (status) status.textContent = '正在读取 Run 历史...';
+  try {
+    const limit = getRunHistoryLimit();
+    const response = await fetch(`/api/orchestrations?limit=${encodeURIComponent(limit)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || payload.error || response.statusText || '读取 Run 历史失败');
+    const runs = Array.isArray(payload) ? payload : (payload.runs || payload.orchestrations || []);
+    state.runHistoryItems = runs;
+    state.runHistoryLoaded = true;
+    renderRunHistory(runs);
+  } catch (error) {
+    state.runHistoryLoaded = false;
+    state.runHistoryItems = [];
+    if ($('run-history-list')) $('run-history-list').innerHTML = '';
+    if (status) status.textContent = `读取失败：${error.message || '未知错误'}`;
+  }
+}
+
 async function viewConversation(id) {
   try {
     if (state.ws) {
@@ -6219,11 +6918,13 @@ async function viewConversation(id) {
     void runConversationInlineScoreBackfill();
     const chatNav = $('chat-nav');
     if (chatNav) chatNav.style.display = 'flex';
+    updateFreeChatReturnButton();
     const chatProgress = $('chat-progress');
     if (chatProgress) chatProgress.style.display = 'flex';
     updateProgress(state.turns.length, state.expectedTurnCount || state.turns.length || 1);
     renderSidebarHistory(state.historyItems || []);
     switchPage('chat');
+    updateFreeChatReturnButton();
     if (['running', 'queued', 'pending'].includes(String(data.status || '').toLowerCase())) {
       connectWebSocket(id);
       showToast('已进入会话：实时跟进中', 'info');
@@ -6821,8 +7522,8 @@ async function retryFailedScoringItems() {
 
     const confirmed = await openActionConfirmDialog({
       title: '确认批量重试失败/未完成打分项',
-      message: `共 ${jobs.length} 个对话、${totalTurns} 个失败/未完成轮次，确定全部重打吗？`,
-      note: '系统会按最新打分提示词重新补齐这些失败/未完成轮次，并在完成后重建评分摘要。',
+      message: `共 ${jobs.length} 个对话、${totalTurns} 个失败/未完成轮次，确定重试这些轮次吗？`,
+      note: '系统只会补齐失败/未完成轮次，不会重跑已成功轮次；完成后会重建评分摘要。',
       confirmText: '确认重试',
     });
     if (!confirmed) return;
@@ -7032,15 +7733,21 @@ function openAiSummaryModal(title) {
   $('ai-summary-error').style.display = 'none';
   if ($('ai-summary-meta')) $('ai-summary-meta').textContent = '';
   if ($('ai-summary-markdown')) $('ai-summary-markdown').textContent = '';
+  if ($('ai-summary-diagnostics')) {
+    $('ai-summary-diagnostics').style.display = 'none';
+    $('ai-summary-diagnostics').innerHTML = '';
+  }
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');
   _aiSummaryModalState = null;
   setAiSummaryDownloadState(false);
 }
 
-function renderAiSummaryMarkdown({ markdown, meta = '', filename = '' }) {
+function renderAiSummaryMarkdown(summary = {}) {
+  const { markdown, meta = '', filename = '' } = summary || {};
   if ($('ai-summary-meta')) $('ai-summary-meta').textContent = meta;
   if ($('ai-summary-markdown')) $('ai-summary-markdown').textContent = markdown || '';
+  renderAiSummaryDiagnostics(summary);
   $('ai-summary-loading').style.display = 'none';
   $('ai-summary-content').style.display = 'block';
   $('ai-summary-error').style.display = 'none';
@@ -7092,6 +7799,8 @@ async function fetchConversationAiSummary(convId, { modelId = DEFAULT_AI_SUMMARY
     markdown: summary.markdown || '',
     filename: buildAiSummaryDownloadFilename(summary, `scoring_report_${convId}`),
     meta: `模型: ${summary.model_id || modelId || DEFAULT_AI_SUMMARY_REPORT_MODEL_ID} · 提示词: ${summary.prompt_version || '-'}${summary.cached ? ' · 已命中缓存' : ''}`,
+    cached: !!summary.cached,
+    ...normalizeScoringDiagnostics(summary),
   };
 }
 
@@ -7396,7 +8105,8 @@ function renderScoreCard(score, idx) {
   const reasoningHtml = reasoning
     ? escapeHtml(reasoning)
     : '<span style="color:var(--text-tertiary)">暂无评分依据</span>';
-  card.innerHTML = `<div class="score-turn-header" onclick="this.parentElement.classList.toggle('expanded')"><span class="score-turn-title">Turn ${idx}</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${statusBadge}${lowScoreBadge}<button class="score-turn-total score-popover-trigger" type="button" style="border:none;background:transparent;color:${totalColor};font-weight:700;cursor:pointer">${totalText}</button></div><button class="score-toggle" style="font-size:12px;color:var(--primary-color);background:rgba(22,100,255,.08);padding:4px 10px;border-radius:4px;border:none;cursor:pointer">🔍 查看AI打分依据</button></div>${popoverHtml}${dimsHtml}${manualHtml}<div class="score-reasoning"><div style="font-weight:600;margin-bottom:6px;color:var(--text-primary)">💡 AI 打分依据</div>${reasoningHtml}</div>`;
+  const evidenceHtml = renderScoreEvidenceChain(score._evidence || {}, { interactive: false });
+  card.innerHTML = `<div class="score-turn-header" onclick="this.parentElement.classList.toggle('expanded')"><span class="score-turn-title">Turn ${idx}</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${statusBadge}${lowScoreBadge}<button class="score-turn-total score-popover-trigger" type="button" style="border:none;background:transparent;color:${totalColor};font-weight:700;cursor:pointer">${totalText}</button></div><button class="score-toggle" style="font-size:12px;color:var(--primary-color);background:rgba(22,100,255,.08);padding:4px 10px;border-radius:4px;border:none;cursor:pointer">查看AI打分依据</button></div>${popoverHtml}${dimsHtml}${manualHtml}<div class="score-reasoning"><div style="font-weight:600;margin-bottom:6px;color:var(--text-primary)">AI 打分依据</div>${reasoningHtml}${evidenceHtml}</div>`;
   const trigger = card.querySelector('.score-popover-trigger');
   const popover = card.querySelector('.score-popover');
   if (trigger && popover) {
@@ -8700,8 +9410,10 @@ function applyBatchRunItemToRow(row, item, { isDryRun, autoScoringEnabled } = {}
       && normalizedStatus !== 'scoring'
       && (failedTurns > 0 || pendingScoringTurns > 0 || (normalizedStatus === 'completed' && !Number.isFinite(avgScore)))
     ) {
+      const action = failedTurns > 0 ? 'retry_failed_turns' : '';
+      const actionArg = action ? `, '${action}'` : '';
       const label = failedTurns > 0 ? '重试失败项' : '同步评分';
-      actions.push(`<button class="btn btn-secondary" onclick="triggerConversationScoringFromBatch('${convId}', this)">${label}</button>`);
+      actions.push(`<button class="btn btn-secondary" onclick="triggerConversationScoringFromBatch('${convId}', this${actionArg})">${label}</button>`);
     }
     row.actionCell.innerHTML = actions.length ? actions.join(' ') : '<span style="color:var(--text-tertiary)">-</span>';
   }
@@ -8892,7 +9604,7 @@ async function pollConversationScoreAvg(convId, { timeoutMs = 30000, intervalMs 
   return null;
 }
 
-async function triggerConversationScoringFromBatch(convId, btnEl) {
+async function triggerConversationScoringFromBatch(convId, btnEl, actionOverride = '') {
   const id = String(convId || '').trim();
   if (!id) {
     showToast('缺少 conversation_id', 'error');
@@ -8930,7 +9642,7 @@ async function triggerConversationScoringFromBatch(convId, btnEl) {
 
   try {
     const current = await fetchConversationScoreResults(id);
-    const actionMeta = getConversationScoringActionMeta(current);
+    const actionMeta = getConversationScoringActionMeta(current, { actionOverride });
     if (btn) btn.textContent = `${actionMeta.label}中…`;
     const payload = await runConversationScoringAction(id, actionMeta.action, { preferLatestPrompt: true });
     let scoreData = current;
@@ -10356,11 +11068,30 @@ function pollCompareRun(runId) {
 }
 
 function buildCompareOrchestrationPayload(configs, models, { dryRun } = {}) {
+  const variants = (models || []).map((model, index) => ({
+    id: model.id || model.modelId || '',
+    modelId: model.modelId || model.id || '',
+    name: model.name || model.label || model.id || `模型${index + 1}`,
+    label: model.label || model.name || model.modelId || model.id || `模型${index + 1}`,
+    variantId: model.variantId || `${model.modelId || model.id || `model-${index + 1}`}::${index + 1}`,
+    thinking_enabled: model.thinking_enabled,
+    thinking_effort: model.thinking_effort,
+  }));
   const autoScoringEnabled = !dryRun;
   return {
     kind: 'compare',
     title: `模型对比 ${new Date().toLocaleString('zh-CN', { hour12: false })}`,
-    concurrency: Math.max(1, Math.min(models.length, MAX_BATCH_CONCURRENCY)),
+    concurrency: Math.max(1, Math.min(variants.length, MAX_BATCH_CONCURRENCY)),
+    config_snapshot: {
+      compare_variant_mode: compareVariantMode,
+      compare_variants: variants.map(item => ({
+        variant_id: item.variantId,
+        model_id: item.modelId || item.id,
+        label: item.label || item.name,
+        thinking_enabled: item.thinking_enabled,
+        thinking_effort: item.thinking_effort,
+      })),
+    },
     groups: configs.map((cfg, rowIndex) => {
       const turns = Array.isArray(cfg.turns)
         ? cfg.turns.filter(item => String(item || '').trim())
@@ -10371,21 +11102,26 @@ function buildCompareOrchestrationPayload(configs, models, { dryRun } = {}) {
         label: String(cfg.nickname || cfg.session_id || `配置${rowIndex + 1}`).trim(),
         relationship: String(cfg.relationship || '').trim(),
         planned_turns: turns.length,
-        items: models.map((model, modelIndex) => {
+        items: variants.map((model, modelIndex) => {
+          const modelId = model.modelId || model.id;
           const payload = buildConversationRunPayload(cfg, {
-            modelId: model.id,
+            modelId,
             turns,
             dryRun: !!dryRun,
           });
-          const thinking = getCompareThinkingState(model.id);
+          const thinking = model.thinking_effort
+            ? resolveThinkingPayload(modelId, model.thinking_enabled !== false, model.thinking_effort)
+            : getCompareThinkingState(modelId);
           payload.thinking_enabled = thinking.enabled;
           payload.thinking_effort = thinking.thinking_effort;
+          payload.compare_variant_id = model.variantId || '';
+          payload.compare_variant_label = model.label || model.name || modelId;
           payload.auto_scoring = autoScoringEnabled;
           return {
-            key: `${groupKey}:${model.id || modelIndex + 1}`,
-            label: model.name || model.id,
+            key: `${groupKey}:${model.variantId || modelId || modelIndex + 1}`,
+            label: model.label || model.name || modelId,
             relationship: String(cfg.relationship || '').trim(),
-            model_id: model.id,
+            model_id: modelId,
             planned_turns: turns.length,
             payload,
           };
@@ -10478,27 +11214,44 @@ function checkProviderConflicts() {
 }
 
 async function initComparePage() {
-  const box = $('compare-model-checkboxes'); box.innerHTML = '';
+  const box = $('compare-model-checkboxes');
+  if (!box) return;
   try {
     const r = await fetch('/api/models?tier=pro'); const data = await r.json();
+    const fragment = document.createDocumentFragment();
     (data.models || data || []).forEach(m => {
       const modelId = m.id || m;
-      const modelName = m.name || modelId;
+      const modelName = m.display_name || m.name || modelId;
       if (m.capabilities) _modelCapabilities[modelId] = m.capabilities;
+      const supportsThinking = modelSupportsThinking(modelId);
       const label = document.createElement('label');
-      label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-hover);border-radius:6px;font-size:13px;cursor:pointer;min-height:36px';
+      label.className = `compare-model-row${supportsThinking ? '' : ' is-thinking-unsupported'}`;
+      label.setAttribute('role', 'button');
+      label.setAttribute('aria-pressed', 'false');
       label.innerHTML = `
         <input type="checkbox" value="${escapeHtml(modelId)}" data-name="${escapeHtml(modelName)}" data-provider="${escapeHtml(m.provider || '')}">
-        <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(modelName)}</span>
+        <span class="compare-model-main">
+          <span class="compare-model-name">${escapeHtml(modelName)}</span>
+          <span class="compare-model-meta">
+            <span>${escapeHtml(m.provider || 'unknown')}</span>
+            <span class="compare-thinking-badge${supportsThinking ? '' : ' is-muted'}">${supportsThinking ? '可调思考' : '无思考参数'}</span>
+          </span>
+        </span>
         <select class="compare-thinking-select" data-model-id="${escapeHtml(modelId)}" title="设置该模型的思考模式"
-          style="font-size:12px;border:1px solid var(--border-light);background:var(--bg-surface);color:var(--text-secondary);border-radius:4px;padding:3px 6px;min-height:26px;cursor:pointer">
-          <option value="disabled">思考关</option>
-          <option value="high">思考高</option>
-          <option value="max">思考Max</option>
-        </select>`;
+          aria-label="${escapeHtml(modelName)} 思考模式"></select>`;
       const input = label.querySelector('input');
       const thinkingSelect = label.querySelector('select.compare-thinking-select');
-      input?.addEventListener('change', () => { refreshTestCenterShell(); checkProviderConflicts(); syncToggleAllBtnText(); });
+      input?.addEventListener('change', () => {
+        if (compareVariantMode === 'thinking' && input.checked) {
+          box.querySelectorAll('input[type="checkbox"]').forEach(other => {
+            if (other !== input) other.checked = false;
+          });
+        }
+        syncCompareModelSelectionStates();
+        refreshTestCenterShell();
+        checkProviderConflicts();
+        syncToggleAllBtnText();
+      });
       thinkingSelect?.addEventListener('click', event => event.stopPropagation());
       thinkingSelect?.addEventListener('change', event => {
         event.stopPropagation();
@@ -10506,9 +11259,13 @@ async function initComparePage() {
         updateCompareThinkingSelect(modelId);
         refreshTestCenterShell();
       });
-      box.appendChild(label);
+      fragment.appendChild(label);
       updateCompareThinkingSelect(modelId);
     });
+    box.replaceChildren(fragment);
+    syncCompareModelSelectionStates();
+    refreshCompareThinkingControls();
+    refreshCompareVariantModeUi();
     syncToggleAllBtnText();
   } catch (e) { console.warn('\u6a21\u578b\u5217\u8868\u52a0\u8f7d\u5931\u8d25:', e); }
 }
@@ -11291,9 +12048,12 @@ async function startModelCompare() {
     showToast('当前已有进行中的模型对比任务，请先暂停/停止或等待完成', 'warning');
     return;
   }
-  const checked = [...$('compare-model-checkboxes').querySelectorAll('input:checked')];
-  if (checked.length < 2) { showToast('请至少选择 2 个模型进行对比', 'warning'); return; }
-  await requestTaskNotificationPermission();
+  const selectedVariants = getSelectedCompareVariants();
+  if (!selectedVariants.ok) {
+    showToast(selectedVariants.error || '请选择有效的模型对比项', 'warning');
+    return;
+  }
+  void requestTaskNotificationPermission();
 
   // 优先使用 Excel 配置；否则退回到单角色 compareConfig
   const excelMode = Array.isArray(compareExcelConfigs) && compareExcelConfigs.length > 0;
@@ -11314,7 +12074,7 @@ async function startModelCompare() {
     return;
   }
 
-  const models = checked.map(c => ({ id: c.value, name: c.dataset.name }));
+  const models = selectedVariants.variants;
   const dryRun = !!$('compare-dryrun').checked;
   try {
     const run = await createOrchestrationRun(buildCompareOrchestrationPayload(configs, models, { dryRun }));
@@ -11582,7 +12342,7 @@ function renderCompareCell(cell) {
   }
   if (normalizedStatus === 'failed' || normalizedStatus === 'cancelled' || normalizedStatus === 'timeout') {
     const errorText = cell.error ? `<div style="margin-top:4px;font-size:11px;color:var(--danger-color);line-height:1.4;max-width:240px;word-break:break-all">${escapeHtml(String(cell.error).slice(0, 220))}</div>` : '';
-    const viewBtn = cell.convId ? `<br><button class="btn btn-secondary" style="margin-top:4px;padding:2px 8px;font-size:11px" onclick="viewConversation('${cell.convId}')">查看</button>` : '';
+    const viewBtn = cell.convId ? `<br><button class="btn btn-secondary" style="margin-top:4px;padding:2px 8px;font-size:11px" onclick="openCompareCellConversationDetail('${escapeInlineJsString(cell.convId)}','${escapeInlineJsString(cell.model?.name || cell.model?.id || '')}')">查看</button>` : '';
     return `<td><span class="status-badge ${getCompareCellBadgeClass(cell)}">${statusLabel}</span>${progressHtml}${errorText}${viewBtn}</td>`;
   }
   // completed
@@ -11594,7 +12354,7 @@ function renderCompareCell(cell) {
     <div style="font-size:13px"><strong>${cell.turnCount}</strong> 轮 · <strong>${cell.avgChars}</strong> 字</div>
     ${cell.autoScoringEnabled ? `<div style="margin-top:4px;font-size:11px;color:var(--text-tertiary)">已打分 ${settledScoreTurns}/${Math.max(Number(cell.turnCount) || 0, 0)}</div>` : ''}
     ${avgScoreHtml}
-    ${cell.convId ? `<button class="btn btn-secondary" style="margin-top:4px;padding:2px 8px;font-size:11px" onclick="viewConversation('${cell.convId}')">查看</button>` : ''}
+    ${cell.convId ? `<button class="btn btn-secondary" style="margin-top:4px;padding:2px 8px;font-size:11px" onclick="openCompareCellConversationDetail('${escapeInlineJsString(cell.convId)}','${escapeInlineJsString(cell.model?.name || cell.model?.id || '')}')">查看</button>` : ''}
   </td>`;
 }
 function renderCompareCards(results) {
@@ -11611,7 +12371,7 @@ function renderCompareCards(results) {
         ? 'var(--danger-color)'
         : 'var(--warning-color)');
     const avgScore = Number.parseFloat(r.avgScore);
-    card.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:12px;color:${colors[i % colors.length]}">🤖 ${escapeHtml(r.model.name)}</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.turnCount}</div><div style="font-size:11px;color:var(--text-tertiary)">完成轮次</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.avgChars}</div><div style="font-size:11px;color:var(--text-tertiary)">平均字数</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${Number.isFinite(avgScore) ? getScoreColor(avgScore) : 'var(--text-tertiary)'}">${Number.isFinite(avgScore) ? avgScore.toFixed(1) : '--'}</div><div style="font-size:11px;color:var(--text-tertiary)">AI均分</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${statusColor}">${statusLabel}</div><div style="font-size:11px;color:var(--text-tertiary)">状态</div></div></div>${r.error ? `<div style="margin-top:12px;font-size:12px;line-height:1.6;color:var(--danger-color)">${escapeHtml(r.error)}</div>` : ''}${r.convId ? `<button class="btn btn-secondary" style="width:100%;margin-top:12px;justify-content:center" onclick="viewConversation('${r.convId}')">📖 查看对话详情</button>` : ''}`;
+    card.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:12px;color:${colors[i % colors.length]}">🤖 ${escapeHtml(r.model.name)}</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.turnCount}</div><div style="font-size:11px;color:var(--text-tertiary)">完成轮次</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700">${r.avgChars}</div><div style="font-size:11px;color:var(--text-tertiary)">平均字数</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${Number.isFinite(avgScore) ? getScoreColor(avgScore) : 'var(--text-tertiary)'}">${Number.isFinite(avgScore) ? avgScore.toFixed(1) : '--'}</div><div style="font-size:11px;color:var(--text-tertiary)">AI均分</div></div><div style="text-align:center;padding:12px;background:var(--bg-hover);border-radius:8px"><div style="font-size:20px;font-weight:700;color:${statusColor}">${statusLabel}</div><div style="font-size:11px;color:var(--text-tertiary)">状态</div></div></div>${r.error ? `<div style="margin-top:12px;font-size:12px;line-height:1.6;color:var(--danger-color)">${escapeHtml(r.error)}</div>` : ''}${r.convId ? `<button class="btn btn-secondary" style="width:100%;margin-top:12px;justify-content:center" onclick="openCompareCellConversationDetail('${escapeInlineJsString(r.convId)}','${escapeInlineJsString(r.model?.name || r.model?.id || '')}')">查看对比详情</button>` : ''}`;
     cards.appendChild(card);
   });
 }
@@ -12485,20 +13245,13 @@ window.toggleCompareMode = function () {
   _compareModeActive = nextCompareMode;
   console.log('toggleCompareMode triggered, state:', _compareModeActive);
   if (_compareModeActive) {
+    localStorage.setItem(FREECHAT_RETURN_STORAGE_KEY, '1');
     switchPage('freechat');
     initFreeChatPage();
-    const btn = document.getElementById('btn-toggle-compare');
-    if (btn) {
-      btn.style.background = 'var(--primary-color)';
-      btn.style.color = 'white';
-    }
+    syncCompareModeButtonState(true);
   } else {
     switchPage('chat');
-    const btn = document.getElementById('btn-toggle-compare');
-    if (btn) {
-      btn.style.background = '';
-      btn.style.color = '';
-    }
+    syncCompareModeButtonState(false);
   }
 };
 
@@ -12508,6 +13261,8 @@ let freeChatSessions = {};
 let _freeChatBridgeHistory = [];
 let _freeChatSlotCounter = 0;
 let _currentFreeChatModel = null;
+let _freeChatPreviewConversationId = '';
+let _freeChatReturnAvailable = false;
 let _webSearchEnabled = false;
 let _thinkingEffort = _dialogueThinkingEffortDraft;
 let _modelCapabilities = {}; // { modelId: { web_search: bool, thinking: bool } }
@@ -12531,6 +13286,7 @@ function onThinkingChange() {
     modelId: getPrimaryModelId(),
     force: true,
   });
+  refreshCompareThinkingControls();
 }
 function updateControlStates(modelId) {
   const caps = _modelCapabilities[modelId] || {};
@@ -12541,6 +13297,163 @@ function updateControlStates(modelId) {
     modelId: getInputValue('f-scoring-model').trim() || modelId,
     force: false,
   });
+  refreshCompareThinkingControls();
+}
+
+function updateFreeChatSlotThinkingSelect(slotKey = '') {
+  const slot = slotKey
+    ? document.querySelector(`.fc-model-slot[data-slot-key="${CSS.escape(slotKey)}"]`)
+    : null;
+  if (!slot) return;
+  const modelId = slot.dataset.modelId || '';
+  const select = slot.querySelector('select.fc-thinking-select');
+  if (!select) return;
+  const payload = getCompareThinkingState(modelId);
+  select.dataset.modelId = modelId;
+  select.disabled = !payload.supported;
+  select.title = payload.supported ? '设置该模型的思考深度' : '该模型不支持思考模式';
+  select.value = payload.supported && payload.enabled ? payload.thinking_effort : 'disabled';
+  slot.classList.toggle('is-thinking-unsupported', !payload.supported);
+}
+
+function syncFreeChatSlotThinkingControls() {
+  document.querySelectorAll('.fc-model-slot').forEach(slot => {
+    updateFreeChatSlotThinkingSelect(slot.dataset.slotKey || '');
+  });
+}
+
+function renderFreeChatConversationPreview(data = {}) {
+  const turns = Array.isArray(data.turns) ? data.turns : (Array.isArray(data.results) ? data.results : []);
+  if (!turns.length) {
+    return '<div class="freechat-conversation-empty">该会话暂无可预览轮次。</div>';
+  }
+  return turns.map((turn, index) => {
+    const userText = turn.user_input || turn.input || turn.user || '';
+    const aiText = turn.ai_output || turn.output || turn.assistant || turn.content || '';
+    const turnNumber = turn.turn || turn.turn_number || index + 1;
+    const meta = [
+      turn.model_id || data.model_id || '',
+      Number.isFinite(Number(turn.input_tokens)) || Number.isFinite(Number(turn.output_tokens))
+        ? `tokens ${Number(turn.input_tokens || 0)}→${Number(turn.output_tokens || 0)}`
+        : '',
+      Number.isFinite(Number(turn.latency_s)) ? `${Number(turn.latency_s || 0).toFixed(1)}s` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <section class="freechat-conversation-turn">
+        <div class="freechat-conversation-turn-head">Turn ${escapeHtml(String(turnNumber))}${meta ? ` · ${escapeHtml(meta)}` : ''}</div>
+        <div class="freechat-conversation-message user">${escapeHtml(userText || '(无用户输入)')}</div>
+        <div class="freechat-conversation-message ai">${renderAiOutput(aiText || '(无模型输出)', state.aiOutputDisplayMode || getAiOutputDisplayMode())}</div>
+      </section>
+    `;
+  }).join('');
+}
+
+async function openFreeChatConversationDetail(convId) {
+  const id = String(convId || '').trim();
+  if (!id) return;
+  _freeChatPreviewConversationId = id;
+  const modal = $('modal-freechat-conversation');
+  const title = $('freechat-conversation-title');
+  const meta = $('freechat-conversation-meta');
+  const body = $('freechat-conversation-body');
+  const fullBtn = $('btn-freechat-open-full-conversation');
+  if (title) title.textContent = '模型回复详情';
+  if (meta) meta.textContent = `会话 ${id}`;
+  if (body) body.innerHTML = '<div class="freechat-conversation-empty">正在读取详情...</div>';
+  if (fullBtn) {
+    fullBtn.disabled = false;
+    fullBtn.style.display = 'inline-flex';
+    fullBtn.textContent = '打开单模型原始会话';
+  }
+  showModal(modal || 'modal-freechat-conversation');
+  try {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || data.error || response.statusText || '读取会话失败');
+    if (title) title.textContent = data.title || data.nickname || data.model_id || '模型回复详情';
+    if (meta) {
+      const turns = Array.isArray(data.turns) ? data.turns : (Array.isArray(data.results) ? data.results : []);
+      const metaParts = [
+        data.model_id || '',
+        data.status ? getConversationStatusLabel(data.status) : '',
+        `${turns.length} 轮`,
+      ].filter(Boolean);
+      meta.textContent = metaParts.join(' · ');
+    }
+    if (body) body.innerHTML = renderFreeChatConversationPreview(data);
+  } catch (error) {
+    if (body) body.innerHTML = `<div class="freechat-conversation-empty">读取失败：${escapeHtml(error.message || '未知错误')}</div>`;
+  }
+}
+
+async function openCompareCellConversationDetail(convId, label = '') {
+  const id = String(convId || '').trim();
+  if (!id) return;
+  _freeChatPreviewConversationId = id;
+  const modal = $('modal-freechat-conversation');
+  const title = $('freechat-conversation-title');
+  const meta = $('freechat-conversation-meta');
+  const body = $('freechat-conversation-body');
+  const fullBtn = $('btn-freechat-open-full-conversation');
+  if (title) title.textContent = label ? `模型对比详情 · ${label}` : '模型对比详情';
+  if (meta) meta.textContent = `留在当前对比 Run 内预览，不切换到单模型会话`;
+  if (body) body.innerHTML = '<div class="freechat-conversation-empty">正在读取详情...</div>';
+  if (fullBtn) fullBtn.style.display = 'none';
+  showModal(modal || 'modal-freechat-conversation');
+  try {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || data.error || response.statusText || '读取会话失败');
+    if (title) title.textContent = label ? `模型对比详情 · ${label}` : (data.title || data.nickname || data.model_id || '模型对比详情');
+    if (meta) {
+      const turns = Array.isArray(data.turns) ? data.turns : (Array.isArray(data.results) ? data.results : []);
+      meta.textContent = [data.model_id || '', data.status ? getConversationStatusLabel(data.status) : '', `${turns.length} 轮`]
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (body) body.innerHTML = renderFreeChatConversationPreview(data);
+  } catch (error) {
+    if (body) body.innerHTML = `<div class="freechat-conversation-empty">读取失败：${escapeHtml(error.message || '未知错误')}</div>`;
+  }
+}
+
+function syncCompareModeButtonState(active = _compareModeActive) {
+  const btn = document.getElementById('btn-toggle-compare');
+  if (!btn) return;
+  btn.style.background = active ? 'var(--primary-color)' : '';
+  btn.style.color = active ? 'white' : '';
+  btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  btn.setAttribute('aria-label', active ? '退出模型对比' : '进入模型对比');
+}
+
+function updateFreeChatReturnButton() {
+  const btn = $('btn-return-freechat');
+  if (!btn) return;
+  const persistedReturn = localStorage.getItem(FREECHAT_RETURN_STORAGE_KEY) === '1';
+  const canReturn = _freeChatReturnAvailable || persistedReturn;
+  btn.style.display = canReturn ? 'inline-flex' : 'none';
+}
+
+function returnToFreeChatCompare() {
+  _compareModeActive = true;
+  _freeChatReturnAvailable = true;
+  localStorage.setItem(FREECHAT_RETURN_STORAGE_KEY, '1');
+  switchPage('freechat');
+  initFreeChatPage();
+  syncCompareModeButtonState(true);
+  updateFreeChatReturnButton();
+}
+
+function openFreeChatPreviewFullConversation() {
+  const id = String(_freeChatPreviewConversationId || '').trim();
+  if (!id) return;
+  closeModal('modal-freechat-conversation');
+  _freeChatReturnAvailable = true;
+  localStorage.setItem(FREECHAT_RETURN_STORAGE_KEY, '1');
+  _compareModeActive = false;
+  syncCompareModeButtonState(false);
+  updateFreeChatReturnButton();
+  viewConversation(id);
 }
 
 function openFreeChatPrompt(modelId, modelName) {
@@ -12706,7 +13619,13 @@ async function initFreeChatPage() {
   try {
     if (_allModelOptions.length === 0) {
       const r = await fetch('/api/models'); const data = await r.json();
-      _allModelOptions = (data.models || data || []).map(m => ({ id: m.id || m, name: m.name || m.id || m }));
+      _allModelOptions = (data.models || data || []).map(m => ({
+        id: m.id || m,
+        name: m.display_name || m.name || m.id || m,
+        provider: m.provider || '',
+        capabilities: m.capabilities || {},
+      }));
+      _allModelOptions.forEach(m => { if (m.capabilities) _modelCapabilities[m.id] = m.capabilities; });
     }
     _freeChatModelList = _allModelOptions.slice();
     // Auto-add first slot
@@ -12743,6 +13662,18 @@ function addModelSlot() {
   settingsBtn.innerHTML = '\u22ee';
   settingsBtn.onclick = () => openFreeChatPrompt(slot.dataset.modelId, slot.dataset.modelName);
 
+  const thinkingSelect = document.createElement('select');
+  thinkingSelect.className = 'fc-thinking-select';
+  thinkingSelect.dataset.slotKey = slot.dataset.slotKey;
+  thinkingSelect.dataset.modelId = defaultModel.id;
+  thinkingSelect.setAttribute('aria-label', '设置该模型的思考深度');
+  renderThinkingEffortOptions(thinkingSelect, defaultModel.id, getDefaultThinkingEffortForModel(defaultModel.id));
+  thinkingSelect.onchange = () => {
+    setCompareThinkingOverride(slot.dataset.modelId, thinkingSelect.value);
+    updateFreeChatSlotThinkingSelect(slot.dataset.slotKey);
+    refreshTestCenterShell();
+  };
+
   // x close button
   const closeBtn = document.createElement('button');
   closeBtn.style.cssText = 'background:none;border:none;padding:6px 8px;cursor:pointer;color:var(--text-tertiary);font-size:14px';
@@ -12764,6 +13695,7 @@ function addModelSlot() {
   };
 
   slot.appendChild(pickerWrap);
+  slot.appendChild(thinkingSelect);
   slot.appendChild(settingsBtn);
   slot.appendChild(closeBtn);
   slots.appendChild(slot);
@@ -12779,6 +13711,7 @@ function addModelSlot() {
         settingsBtn.id = `btn-fc-prompt-${item.id.replace(/[^a-zA-Z0-9-]/g, '-')}`;
         delete slot.dataset.convId;
         delete freeChatSessions[slot.dataset.slotKey];
+        updateFreeChatSlotThinkingSelect(slot.dataset.slotKey);
         if (previousModelId && previousModelId !== item.id && hasAnyFreeChatTurns()) {
           clearFreeChat({ preserveSlots: true }).catch(() => { });
           showToast('模型选择已变更，当前模型对比会话已重置', 'info');
@@ -12791,6 +13724,7 @@ function addModelSlot() {
   };
   rerenderSlotPicker(defaultModel.id);
   refreshFreeChatPromptButtonState(defaultModel.id);
+  updateFreeChatSlotThinkingSelect(slot.dataset.slotKey);
   syncFreeChatThinkingEffortDefault();
   if (hasAnyFreeChatTurns()) {
     clearFreeChat({ preserveSlots: true }).catch(() => { });
@@ -12840,7 +13774,7 @@ async function sendFreeChat() {
     const sessions = await Promise.all(slots.map(slot => ensureFreeChatConversationSession(slot)));
     clearPendingModeSwitchState('short');
     const results = await Promise.all(sessions.map(async (session, index) => {
-      const dialogueThinking = getDialogueThinkingState(session.modelId);
+      const dialogueThinking = getCompareThinkingState(session.modelId);
       const response = await fetch(`/api/conversations/${session.convId}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -12890,8 +13824,19 @@ async function sendFreeChat() {
         ? renderAiOutputBlock(content, { style: 'line-height:1.6;font-size:13px' })
         : `<div style="line-height:1.6;font-size:13px">${escapeHtml(content)}</div>`;
       const tokens = res.success ? `${res.input_tokens || 0}+${res.output_tokens || 0} tok · ${(res.latency_s || 0).toFixed(1)}s` : '';
-      const extra = res.convId ? `<div style="margin-top:8px"><button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="viewConversation('${res.convId}')">查看对话</button></div>` : '';
-      card.innerHTML = `<div class="chat-label" style="color:${colors[i % 3]}">🤖 ${escapeHtml(name)}</div>${renderedContent}${tokens ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${tokens}</div>` : ''}${extra}`;
+      card.innerHTML = `<div class="chat-label" style="color:${colors[i % 3]}">🤖 ${escapeHtml(name)}</div>${renderedContent}${tokens ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${tokens}</div>` : ''}`;
+      if (res.convId) {
+        const detailWrap = document.createElement('div');
+        detailWrap.style.marginTop = '8px';
+        const detailBtn = document.createElement('button');
+        detailBtn.className = 'btn btn-secondary';
+        detailBtn.type = 'button';
+        detailBtn.style.cssText = 'width:100%;justify-content:center';
+        detailBtn.textContent = '预览详情';
+        detailBtn.onclick = () => openFreeChatConversationDetail(res.convId);
+        detailWrap.appendChild(detailBtn);
+        card.appendChild(detailWrap);
+      }
       grid.appendChild(card);
     });
     area.appendChild(grid);
@@ -12908,6 +13853,8 @@ async function clearFreeChat({ preserveSlots = false } = {}) {
   freeChatSessions = {};
   _freeChatBridgeHistory = [];
   state.compareReportId = '';
+  _freeChatReturnAvailable = false;
+  localStorage.removeItem(FREECHAT_RETURN_STORAGE_KEY);
   renderFreeChatEmptyState();
   updateFreeChatReportState();
   if (!preserveSlots && $('freechat-model-slots')?.children.length === 0) {
@@ -14004,6 +14951,7 @@ function openSPPreview() {
 /* ═══ 初始化 & 事件绑定 ═══ */
 document.addEventListener('DOMContentLoaded', () => {
   fetchPresets(); fetchModels(); loadHistory(); fetchPromptVersions(); initComparePage();
+  bindChatEnterShortcuts();
   window.setTimeout(() => {
     restoreActiveABSession({ silent: true }).catch(() => { });
   }, 800);
@@ -14063,6 +15011,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('暂无调试数据', 'warning');
     }
   };
+  if ($('btn-return-freechat')) $('btn-return-freechat').onclick = returnToFreeChatCompare;
   if ($('debug-tab-messages')) $('debug-tab-messages').onclick = () => switchDebugPanel('messages');
   if ($('debug-tab-request')) $('debug-tab-request').onclick = () => switchDebugPanel('request');
   if ($('btn-copy-debug-json')) $('btn-copy-debug-json').onclick = copyCurrentDebugJson;
@@ -14280,7 +15229,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dropdown) dropdown.style.display = 'none';
     }
   });
-  ['modal-freechat-prompt', 'modal-scoring', 'modal-debug', 'modal-human-score', 'modal-sp-edit', 'modal-sp-preview', 'modal-module-edit', 'modal-preset-delete', 'modal-action-confirm']
+  ['modal-freechat-conversation', 'modal-freechat-prompt', 'modal-scoring', 'modal-debug', 'modal-human-score', 'modal-sp-edit', 'modal-sp-preview', 'modal-module-edit', 'modal-preset-delete', 'modal-action-confirm']
     .forEach(id => {
       const modal = $(id);
       if (!modal) return;

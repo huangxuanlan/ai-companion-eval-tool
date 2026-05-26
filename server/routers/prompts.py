@@ -53,7 +53,13 @@ def _chat_prompt_path(filename: str):
     ephemeral_path = resolve_ephemeral_prompt_path(filename)
     if ephemeral_path is not None:
         return ephemeral_path
-    path = PROMPT_DIR / filename
+    requested = str(filename or "").strip()
+    path = PROMPT_DIR / requested
+    if not path.exists():
+        for candidate in list_prompt_files():
+            if candidate.name == requested:
+                path = candidate
+                break
     if not path.exists() or path.suffix.lower() != ".md":
         raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
     return path

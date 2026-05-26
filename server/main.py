@@ -130,7 +130,7 @@ app.include_router(configs.router)
 STATIC_DIR = SERVER_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-APP_SHELL_VERSION = "93"
+APP_SHELL_VERSION = "96"
 
 
 @app.get("/")

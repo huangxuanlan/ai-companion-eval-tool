@@ -195,6 +195,13 @@ def _build_ai_summary_items(conversation: dict) -> list[dict]:
     return items
 
 
+def _build_scoring_detail_diagnostics(conversation: dict) -> dict:
+    return ScoringService.build_scoring_diagnostics(
+        _build_ai_summary_items(conversation),
+        DIMENSIONS,
+    )
+
+
 def _flatten_scored_rows(scored_rows: list[dict]) -> list[dict]:
     flattened = []
     for row in scored_rows:
@@ -433,14 +440,10 @@ def _build_scoring_action_state(
         recommended_action = "resume_sync"
         recommended_action_label = "继续同步"
         recommended_action_detail = "后台处理中，继续同步结果"
-    elif failed_count > 0 and scored_count > 0:
+    elif failed_count > 0:
         recommended_action = "retry_failed_turns"
         recommended_action_label = "重试失败项"
-        recommended_action_detail = "仅重试失败轮次，保留已成功评分"
-    elif failed_count > 0:
-        recommended_action = "rescore_all"
-        recommended_action_label = "重新全部打分"
-        recommended_action_detail = "当前没有可用评分结果，整段重打"
+        recommended_action_detail = "仅重试失败或未完成轮次，保留已成功评分"
     elif repair_summary_needed:
         recommended_action = "repair_summary"
         recommended_action_label = "汇总评分"
@@ -449,10 +452,6 @@ def _build_scoring_action_state(
         recommended_action = "retry_failed_turns"
         recommended_action_label = "重试失败项"
         recommended_action_detail = "仅补失败或未完成轮次"
-    elif pending_count > 0 and failed_count > 0:
-        recommended_action = "rescore_all"
-        recommended_action_label = "重新全部打分"
-        recommended_action_detail = "当前没有可用评分结果，整段重打"
     elif pending_count > 0:
         recommended_action = "start_scoring"
         recommended_action_label = "开始打分"
@@ -1933,6 +1932,7 @@ async def get_scoring_results(conv_id: str):
     scoring_view = _build_scoring_state_view(conv_id, conversation)
     summary = scoring_view["summary"]
     meta = scoring_view["meta"]
+    diagnostics = _build_scoring_detail_diagnostics(conversation)
 
     turns = []
     for result in conversation.get("results", []):
@@ -1960,6 +1960,7 @@ async def get_scoring_results(conv_id: str):
         "turns": turns,
         "summary": summary,
         "action": scoring_view["action"],
+        **diagnostics,
     }
 
 
@@ -2034,6 +2035,10 @@ async def generate_ai_summary(
         prompt_version=prompt_version.strip() or None,
         conversation_id=conv_id,
     )
+    summary_data = {
+        **summary_data,
+        **_build_scoring_detail_diagnostics(conversation),
+    }
     return {"conversation_id": conv_id, "summary": summary_data}
 
 

@@ -25,6 +25,11 @@ def _get_adapter():
 
 
 def _is_mini(m: dict) -> bool:
+    explicit_tier = str(m.get("tier", "") or "").strip().lower()
+    if explicit_tier == "mini":
+        return True
+    if explicit_tier == "pro":
+        return False
     labels = [
         str(m.get("id", "") or ""),
         str(m.get("name", "") or ""),

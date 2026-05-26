@@ -9,7 +9,7 @@
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f6feb'/%3E%3Cpath d='M18 20h28v6H18zm0 12h20v6H18zm0 12h28v6H18z' fill='white'/%3E%3C/svg%3E">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="vendor/xlsx.full.min.js"></script>
-  <link rel="stylesheet" href="css/main.css?v=91">
+  <link rel="stylesheet" href="css/main.css?v=93">
 
 </head>
 
@@ -76,7 +76,8 @@
             style="padding:6px" onclick="toggleAiOutputDisplayMode()">原样</button>
           <button class="btn btn-secondary" id="btn-clear-chat" title="清除上下文" style="padding:6px"
             onclick="confirmClearChatContext()">🗑️</button>
-          <button class="btn btn-secondary" id="btn-toggle-compare" title="模型对比" style="padding:6px"
+          <button class="btn btn-secondary" id="btn-toggle-compare" title="模型对比" aria-label="进入模型对比"
+            aria-pressed="false" role="button" style="padding:6px"
             onclick="toggleCompareMode()">⇄</button>
           <button class="btn btn-secondary" id="btn-new-chat" title="新建会话" style="padding:6px"
             onclick="handleNewChatSession()">➕</button>
@@ -126,6 +127,7 @@
         <span id="chat-typing-text">请求已发送</span>
       </div>
       <div class="btn-group chat-shell-row chat-actions-row" id="chat-nav" style="display:none">
+        <button class="btn btn-secondary" id="btn-return-freechat" type="button" style="display:none">← 返回模型对比</button>
         <button class="btn btn-secondary" id="btn-view-msgs">📋 查看调试详情</button>
         <button class="btn btn-secondary" id="btn-export-excel">📥 导出 Excel</button>
         <button class="btn btn-primary" id="btn-score-conv" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">⭐
@@ -134,8 +136,8 @@
       <!-- 对话输入框 -->
       <div class="input-dock chat-shell-row" id="chat-input-dock">
         <div class="input-wrapper">
-          <textarea id="chat-input" placeholder="输入消息..."
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"></textarea>
+          <textarea id="chat-input" placeholder="输入消息... (Enter发送，Ctrl+Enter换行)"
+            onkeydown="handleChatInputKey(event, sendChatMessage)"></textarea>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;gap:12px">
             <div style="display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text-secondary)">
               <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
@@ -199,7 +201,8 @@
       <div style="padding:4px 8% 12px;display:flex;gap:8px">
         <textarea id="freechat-input" class="form-control"
           style="flex:1;min-height:44px;max-height:120px;resize:vertical;font-family:var(--font)"
-          placeholder="输入消息..."></textarea>
+          onkeydown="handleChatInputKey(event, sendFreeChat)"
+          placeholder="输入消息... (Enter发送，Ctrl+Enter换行)"></textarea>
         <button class="btn btn-primary" id="btn-freechat-send" style="padding:0 24px"
           onclick="sendFreeChat()">发送</button>
         <button class="btn btn-secondary" onclick="clearFreeChat()" title="清空对话">🗑️</button>
@@ -213,6 +216,28 @@
           onclick="generateFreeChatCompareReport()" disabled>📊 生成对比报告</button>
       </div>
     </section>
+
+    <div id="modal-freechat-conversation" class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="freechat-conversation-title" aria-hidden="true" tabindex="-1"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.42);z-index:999;align-items:center;justify-content:center;padding:20px;">
+      <div class="freechat-conversation-modal">
+        <div class="freechat-conversation-header">
+          <div>
+            <h3 id="freechat-conversation-title">模型回复详情</h3>
+            <div id="freechat-conversation-meta" class="freechat-conversation-meta"></div>
+          </div>
+          <button class="freechat-conversation-close" type="button" onclick="closeModal('modal-freechat-conversation')"
+            aria-label="关闭">×</button>
+        </div>
+        <div id="freechat-conversation-body" class="freechat-conversation-body"></div>
+        <div class="freechat-conversation-actions">
+          <button class="btn btn-secondary" type="button"
+            onclick="closeModal('modal-freechat-conversation')">返回模型对比</button>
+          <button class="btn btn-secondary" type="button" id="btn-freechat-open-full-conversation"
+            onclick="openFreeChatPreviewFullConversation()">打开单模型原始会话</button>
+        </div>
+      </div>
+    </div>
 
     <!-- P-freechat: 独立 Prompt 编辑弹窗 -->
     <div id="modal-freechat-prompt" class="modal" role="dialog" aria-modal="true"
@@ -339,6 +364,7 @@
                 <div class="score-progress-fill" id="scoring-progress-fill" style="width:0%"></div>
               </div>
             </div>
+            <div id="scoring-diagnostics" class="score-diagnostics" aria-live="polite" style="display:none"></div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;border:1px solid var(--border-light);border-radius:12px;background:var(--bg-hover)">
               <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                 <label class="form-label" for="score-low-threshold" style="margin:0">低分阈值</label>
@@ -387,6 +413,7 @@
           </div>
           <div id="ai-summary-content" style="display:none">
             <div id="ai-summary-meta" style="font-size:12px;color:var(--text-secondary);margin-bottom:12px"></div>
+            <div id="ai-summary-diagnostics" class="score-diagnostics score-diagnostics-report" style="display:none"></div>
             <pre id="ai-summary-markdown"
               style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.75;background:var(--bg-hover);padding:16px;border-radius:10px;max-height:60vh;overflow:auto;margin:0"></pre>
           </div>
@@ -501,6 +528,15 @@
           onclick="switchPage('chat')">去对话测试</button>
       </div>
       <div id="history-content" style="display:none">
+        <div class="history-page-tabs" role="tablist" aria-label="历史记录类型">
+          <button class="history-page-tab active" id="history-tab-conversations" type="button" role="tab"
+            aria-selected="true" aria-controls="history-conversations-panel"
+            onclick="switchHistoryTab('conversations')">会话历史</button>
+          <button class="history-page-tab" id="history-tab-runs" type="button" role="tab"
+            aria-selected="false" aria-controls="history-runs-panel"
+            onclick="switchHistoryTab('runs')">Run 历史</button>
+        </div>
+        <div id="history-conversations-panel" role="tabpanel" aria-labelledby="history-tab-conversations">
         <div style="display:grid;grid-template-columns:1.2fr 1.2fr 1.2fr 1fr 1fr 1fr 0.8fr 0.8fr auto auto auto;gap:8px;margin-bottom:16px">
           <input type="text" id="history-filter-role" class="form-control" placeholder="按角色筛选">
           <input type="text" id="history-filter-model" class="form-control" placeholder="按模型筛选">
@@ -618,6 +654,22 @@
           </thead>
           <tbody id="history-tbody"></tbody>
         </table>
+        </div>
+        <div id="history-runs-panel" role="tabpanel" aria-labelledby="history-tab-runs" style="display:none">
+          <div class="run-history-toolbar">
+            <div>
+              <div class="run-history-title">Run 历史</div>
+              <div class="run-history-subtitle">读取编排任务快照，展示 run id、标题、类型、状态、摘要与配置快照。</div>
+            </div>
+            <div class="run-history-actions">
+              <label class="run-history-limit-label" for="run-history-limit">数量</label>
+              <input id="run-history-limit" class="form-control" type="number" min="1" max="200" step="1" value="50">
+              <button class="btn btn-secondary" type="button" onclick="loadRunHistory({ force: true })">刷新</button>
+            </div>
+          </div>
+          <div id="run-history-status" class="run-history-status">切换到 Run 历史后自动读取最近任务。</div>
+          <div id="run-history-list" class="run-history-list"></div>
+        </div>
       </div>
     </section>
 
@@ -635,16 +687,19 @@
         </div>
         <div class="test-mode-grid" role="tablist" aria-label="测试任务类型">
           <button type="button" class="test-mode-card active" id="tc-mode-batch"
+            role="tab" aria-selected="true" aria-controls="tc-tab-batch"
             onclick="switchTestCenterMode('batch')">
             <strong>批量测试</strong>
             <span>批量配置 + 多轮输入，适合跑完整回归。</span>
           </button>
           <button type="button" class="test-mode-card" id="tc-mode-compare"
+            role="tab" aria-selected="false" aria-controls="tc-tab-compare"
             onclick="switchTestCenterMode('compare')">
             <strong>模型对比</strong>
             <span>同一角色和输入，横向比较多模型表现。</span>
           </button>
           <button type="button" class="test-mode-card" id="tc-mode-prompt-ab"
+            role="tab" aria-selected="false" aria-controls="tc-tab-prompt-ab"
             onclick="switchTestCenterMode('prompt-ab')">
             <strong>Prompt A/B</strong>
             <span>控制组与实验组并行对比，支持实时与历史复盘。</span>
@@ -955,6 +1010,7 @@
               💬 多轮对话输入（每行一轮）
             </div>
             <textarea id="compare-turns" class="form-control" style="font-family:var(--font);min-height:120px"
+              onkeydown="handleCompareTurnsKey(event)"
               placeholder="今天天气真好&#10;你刚才看我的眼神好奇怪&#10;那你为什么突然笑了"></textarea>
             <span style="font-size:11px;color:var(--text-tertiary)">所有对比模型将使用相同的多轮用户输入</span>
           </div>
@@ -973,9 +1029,17 @@
               对比模型与执行策略
             </div>
             <div style="display:flex;flex-direction:column;gap:8px;">
+              <div class="compare-variant-controls">
+                <label class="form-label" for="compare-variant-mode" style="margin:0;">对比维度</label>
+                <select id="compare-variant-mode" class="form-control" onchange="setCompareVariantMode(this.value)">
+                  <option value="models">跨模型对比</option>
+                  <option value="thinking">同模型思考对比</option>
+                </select>
+                <span id="compare-variant-hint" class="compare-variant-hint">选择 2 个及以上模型，每个模型使用各自下拉框里的思考设置。</span>
+              </div>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                 <label class="form-label" style="margin:0;">选择对比模型（可多选）</label>
-                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <div id="compare-thinking-bulk-actions" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                   <button type="button" class="btn btn-secondary"
                     style="padding:4px 10px;font-size:12px;min-height:auto"
                     onclick="applyCompareThinkingToSelected('disabled')">思考全关</button>
@@ -989,7 +1053,7 @@
                     style="padding:4px 10px;font-size:12px;min-height:auto" onclick="toggleSelectAllCompareModels()">全选</button>
                 </div>
               </div>
-              <div id="compare-model-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              <div id="compare-model-checkboxes" class="compare-model-list"></div>
             </div>
             <div style="display:flex;align-items:center;gap:16px;margin-top:4px;">
               <label class="form-label" style="margin:0;min-width:70px">安全落盘</label>
@@ -1972,7 +2036,7 @@
       <div id="history-summary-task-fill" class="batch-rescore-float-fill" style="width:0%"></div>
     </div>
   </div>
-  <script src="js/legacy_bundle.js?v=97" defer></script>
+  <script src="js/legacy_bundle.js?v=106" defer></script>
 </body>
 
 </html>

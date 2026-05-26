@@ -18,6 +18,276 @@ from config import (
     DEFAULT_VOICE_FORBIDDEN,
 )
 
+RUNTIME_CONFIG_SCHEMA_VERSION = "2026-05-22"
+THINKING_EFFORT_VALUES = {"disabled", "low", "medium", "high", "max"}
+CHARACTER_CONTRACT_KEYS = (
+    "Role_Nickname", "gender", "age", "occupation", "personality",
+    "personal_type", "Role_info_works", "speaking_style", "background", "hobby",
+)
+CONTEXT_CONTRACT_KEYS = (
+    "relationship", "scene", "current_scene", "time_period", "timeperiod",
+    "season", "currentTime", "weekDay", "完整时间信息", "last_cst_type",
+    "intimacy_boundary", "relation_calling", "relation_info", "user_nickname",
+    "user_gender", "user_identity", "relation_rule4", "system_module11",
+)
+MODULE_CONTRACT_KEYS = (
+    "longform_persona", "longform_narrative_style",
+    "longform_dialogue_guideline", "longform_few_shot", "dialogueStartPrompt",
+    "dialogue_summary", "moments", "monthly_schedule", "weekly_schedule",
+    "system_module8", "system_Role_acting", "voice_forbidden", "system_prompt",
+    "user_Nickname", "user_gender", "user_identity",
+)
+
+
+def _clean_mapping(value: Any, keys: tuple[str, ...] | None = None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    if keys is None:
+        return dict(value)
+    return {key: value[key] for key in keys if key in value}
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "开启"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "关闭"}:
+        return False
+    return None
+
+
+def _bounded_int(
+    value: Any,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
+def _optional_float(value: Any, *, minimum: float, maximum: float) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(minimum, min(maximum, number))
+
+
+def _thinking_effort(value: Any, default: str = "disabled") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in THINKING_EFFORT_VALUES else default
+
+
+def normalize_longform_config_contract(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize Web, CLI, and fixture configs to the same longform contract."""
+    source = dict(config or {})
+    runtime_source = _clean_mapping(source.get("runtime"))
+    character = _clean_mapping(source.get("character"), CHARACTER_CONTRACT_KEYS)
+    context = _clean_mapping(source.get("context"), CONTEXT_CONTRACT_KEYS)
+    modules = _clean_mapping(source.get("modules"), MODULE_CONTRACT_KEYS)
+    custom_variables = _clean_mapping(source.get("custom_variables"))
+
+    if context.get("current_scene") and not context.get("scene"):
+        context["scene"] = context["current_scene"]
+    if context.get("scene") and not context.get("current_scene"):
+        context["current_scene"] = context["scene"]
+    if context.get("timeperiod") and not context.get("time_period"):
+        context["time_period"] = context["timeperiod"]
+    if context.get("time_period") and not context.get("timeperiod"):
+        context["timeperiod"] = context["time_period"]
+    if context.get("user_nickname") and not modules.get("user_Nickname"):
+        modules["user_Nickname"] = context["user_nickname"]
+    if context.get("user_gender") and not modules.get("user_gender"):
+        modules["user_gender"] = context["user_gender"]
+    if context.get("user_identity") and not modules.get("user_identity"):
+        modules["user_identity"] = context["user_identity"]
+    if character.get("personality") and not character.get("personal_type"):
+        character["personal_type"] = character["personality"]
+    if modules.get("longform_few_shot") and not source.get("few_shot_file"):
+        source["few_shot_file"] = modules["longform_few_shot"]
+    modules.setdefault("voice_forbidden", DEFAULT_VOICE_FORBIDDEN)
+
+    model_ids = source.get("model_ids") or runtime_source.get("model_ids") or []
+    if not isinstance(model_ids, list):
+        model_ids = [model_ids]
+    model_ids = [str(item).strip() for item in model_ids if str(item or "").strip()]
+    model_id = str(
+        source.get("model_id")
+        or runtime_source.get("model_id")
+        or (model_ids[0] if model_ids else "")
+        or DEFAULT_PRIMARY_MODEL
+        or ""
+    ).strip()
+    if model_id and model_id not in model_ids:
+        model_ids.insert(0, model_id)
+
+    scoring_model_id = str(
+        source.get("scoring_model_id")
+        or runtime_source.get("scoring_model_id")
+        or DEFAULT_SCORING_MODEL
+        or model_id
+        or ""
+    ).strip()
+    summary_interval = _bounded_int(
+        source.get("summary_interval", runtime_source.get("summary_interval")),
+        DEFAULT_SUMMARY_INTERVAL,
+        minimum=1,
+    )
+    injection_depth = _bounded_int(
+        source.get("injection_depth", runtime_source.get("injection_depth")),
+        DEFAULT_INJECTION_DEPTH,
+        minimum=1,
+    )
+    scoring_max_workers = _bounded_int(
+        source.get("scoring_max_workers", runtime_source.get("scoring_max_workers")),
+        2,
+        minimum=1,
+        maximum=24,
+    )
+    scoring_retry_count = _bounded_int(
+        source.get("scoring_retry_count", runtime_source.get("scoring_retry_count")),
+        3,
+        minimum=0,
+        maximum=10,
+    )
+
+    thinking_enabled = _optional_bool(
+        source.get("thinking_enabled", runtime_source.get("thinking_enabled"))
+    )
+    scoring_thinking_enabled = _optional_bool(
+        source.get(
+            "scoring_thinking_enabled",
+            runtime_source.get("scoring_thinking_enabled"),
+        )
+    )
+    runtime = {
+        "schema_version": RUNTIME_CONFIG_SCHEMA_VERSION,
+        "model_ids": model_ids,
+        "compare_mode": str(
+            source.get("compare_mode") or runtime_source.get("compare_mode") or ""
+        ).strip(),
+        "model_mini": str(
+            source.get("model_mini") or runtime_source.get("model_mini") or ""
+        ).strip(),
+        "scoring_model_id": scoring_model_id,
+        "profile_model_id": str(
+            source.get("profile_model_id")
+            or runtime_source.get("profile_model_id")
+            or ""
+        ).strip(),
+        "prompt_version": str(
+            source.get("prompt_version") or runtime_source.get("prompt_version") or ""
+        ).strip(),
+        "summary_prompt_version": str(
+            source.get("summary_prompt_version")
+            or runtime_source.get("summary_prompt_version")
+            or ""
+        ).strip(),
+        "scoring_prompt_version": str(
+            source.get("scoring_prompt_version")
+            or runtime_source.get("scoring_prompt_version")
+            or ""
+        ).strip(),
+        "profile_prompt_version": str(
+            source.get("profile_prompt_version")
+            or runtime_source.get("profile_prompt_version")
+            or ""
+        ).strip(),
+        "summary_interval": summary_interval,
+        "injection_depth": injection_depth,
+        "thinking_effort": _thinking_effort(
+            source.get("thinking_effort", runtime_source.get("thinking_effort")),
+        ),
+        "scoring_thinking_effort": _thinking_effort(
+            source.get(
+                "scoring_thinking_effort",
+                runtime_source.get("scoring_thinking_effort"),
+            ),
+        ),
+        "scoring_max_workers": scoring_max_workers,
+        "scoring_retry_count": scoring_retry_count,
+    }
+    if thinking_enabled is not None:
+        runtime["thinking_enabled"] = thinking_enabled
+    if scoring_thinking_enabled is not None:
+        runtime["scoring_thinking_enabled"] = scoring_thinking_enabled
+    temperature = _optional_float(
+        source.get("temperature", runtime_source.get("temperature")),
+        minimum=0.0,
+        maximum=2.0,
+    )
+    if temperature is not None:
+        runtime["temperature"] = temperature
+    top_p = _optional_float(
+        source.get("top_p", runtime_source.get("top_p")),
+        minimum=0.0,
+        maximum=1.0,
+    )
+    if top_p is not None:
+        runtime["top_p"] = top_p
+    for key in ("dry_run", "auto_scoring"):
+        value = _optional_bool(source.get(key, runtime_source.get(key)))
+        if value is not None:
+            runtime[key] = value
+
+    turns = source.get("turns", [])
+    if isinstance(turns, str):
+        turns = [line for line in turns.splitlines() if line.strip()]
+    elif not isinstance(turns, list):
+        turns = []
+
+    return {
+        "runtime_schema_version": RUNTIME_CONFIG_SCHEMA_VERSION,
+        "model_id": model_id,
+        "model_ids": model_ids,
+        "compare_mode": runtime["compare_mode"],
+        "model_mini": runtime["model_mini"],
+        "scoring_model_id": scoring_model_id,
+        "profile_model_id": runtime["profile_model_id"],
+        "prompt_version": runtime["prompt_version"],
+        "summary_prompt_version": runtime["summary_prompt_version"],
+        "scoring_prompt_version": runtime["scoring_prompt_version"],
+        "profile_prompt_version": runtime["profile_prompt_version"],
+        "summary_interval": runtime["summary_interval"],
+        "injection_depth": runtime["injection_depth"],
+        "thinking_enabled": runtime.get("thinking_enabled"),
+        "thinking_effort": runtime["thinking_effort"],
+        "scoring_thinking_enabled": runtime.get("scoring_thinking_enabled"),
+        "scoring_thinking_effort": runtime["scoring_thinking_effort"],
+        "scoring_max_workers": runtime["scoring_max_workers"],
+        "scoring_retry_count": runtime["scoring_retry_count"],
+        "temperature": runtime.get("temperature"),
+        "top_p": runtime.get("top_p"),
+        "dry_run": runtime.get("dry_run", False),
+        "auto_scoring": runtime.get("auto_scoring", True),
+        "prompt_file": str(
+            source.get("prompt_file")
+            or runtime.get("prompt_version")
+            or ""
+        ).strip(),
+        "few_shot_file": str(source.get("few_shot_file") or "").strip(),
+        "turns": turns,
+        "character": character,
+        "context": context,
+        "modules": modules,
+        "custom_variables": custom_variables,
+        "runtime": runtime,
+    }
+
 
 def normalize_frontend_aliases(config: dict[str, Any]) -> None:
     """兼容旧前端字段命名，统一为核心链路使用的 key。"""
@@ -167,6 +437,8 @@ def apply_runtime_defaults(
     modules = config.setdefault("modules", {})
     modules.setdefault("voice_forbidden", DEFAULT_VOICE_FORBIDDEN)
     config.setdefault("runtime", {})
+    config["runtime"]["schema_version"] = RUNTIME_CONFIG_SCHEMA_VERSION
+    config["runtime_schema_version"] = RUNTIME_CONFIG_SCHEMA_VERSION
     config["runtime"]["summary_interval"] = max(
         1,
         int(summary_interval or DEFAULT_SUMMARY_INTERVAL),

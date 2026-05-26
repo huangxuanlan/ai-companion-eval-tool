@@ -14,7 +14,9 @@ from config import (
     NARRATIVE_VAR_DIR,
     PROJECT_DIR,
     FEW_SHOT_DIR,
+    FEW_SHOT_LATEST_DIR,
     RELATIONSHIP_PRESETS,
+    list_prompt_files,
 )
 from services.public_demo import resolve_ephemeral_prompt_path
 
@@ -29,14 +31,13 @@ class PromptService:
         TEST_PROMPT_DIR,
     ]
 
+    FEW_SHOT_LATEST_DIR = FEW_SHOT_LATEST_DIR
     FEW_SHOT_SOURCE_ROOTS = [
-        NARRATIVE_VAR_DIR / "示例——长文模式",
-        FEW_SHOT_DIR,
-        NARRATIVE_VAR_DIR,
-        VARIABLE_DIR,
+        FEW_SHOT_LATEST_DIR,
     ]
     FEW_SHOT_SEARCH_PATHS = [
         *FEW_SHOT_SOURCE_ROOTS,
+        FEW_SHOT_DIR,
         PROJECT_DIR,
     ]
 
@@ -60,7 +61,7 @@ class PromptService:
         ),
     }
     FEW_SHOT_VERSION_RE = re.compile(
-        r"（精选版）_v(?P<version>\d+)(?:_(?P<date>\d{8}))?\.md$",
+        r"（精选版）_v(?P<version>\d+)(?:_(?P<date>\d{8}))?(?:_formatted)?\.md$",
         re.IGNORECASE,
     )
 
@@ -347,7 +348,20 @@ class PromptService:
 
     @staticmethod
     def _is_archived_few_shot_candidate(candidate: Path) -> bool:
-        return any("归档" in str(part) for part in candidate.parts)
+        return any(
+            "归档" in str(part) or "archive" in str(part).lower()
+            for part in candidate.parts
+        )
+
+    @classmethod
+    def _is_under_latest_few_shot_dir(cls, candidate: Path) -> bool:
+        if cls._is_archived_few_shot_candidate(candidate):
+            return False
+        try:
+            candidate.resolve().relative_to(cls.FEW_SHOT_LATEST_DIR.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
 
     @classmethod
     def _rank_few_shot_candidate(cls, candidate: Path) -> tuple[int, int, int, str]:
@@ -415,7 +429,7 @@ class PromptService:
         if not personal_type or not gender:
             return None
         seen: set[str] = set()
-        for roots in (self.FEW_SHOT_SOURCE_ROOTS, [PROJECT_DIR]):
+        for roots in (self.FEW_SHOT_SOURCE_ROOTS,):
             matches: list[Path] = []
             for base in roots:
                 if not base.exists():
@@ -454,9 +468,10 @@ class PromptService:
             resolved = self._resolve_path(few_shot_path, self.FEW_SHOT_SEARCH_PATHS)
             if resolved.exists():
                 explicit_candidate = resolved
-                if explicit_path and explicit_path.is_absolute():
-                    return resolved, self._to_display_path(resolved)
-                if "（精选版）" in resolved.name:
+                if (
+                    "（精选版）" in resolved.name
+                    and self._is_under_latest_few_shot_dir(resolved)
+                ):
                     return resolved, self._to_display_path(resolved)
 
         preferred = self._find_preferred_few_shot_file(
@@ -467,7 +482,9 @@ class PromptService:
         if preferred is not None:
             return preferred, self._to_display_path(preferred)
         if explicit_candidate is not None:
-            return explicit_candidate, self._to_display_path(explicit_candidate)
+            if self._is_under_latest_few_shot_dir(explicit_candidate):
+                return explicit_candidate, self._to_display_path(explicit_candidate)
+            return None, ""
         return None, ""
 
     def load_prompt_template(self, prompt_path: str) -> str:
@@ -476,6 +493,11 @@ class PromptService:
         if ephemeral_path and ephemeral_path.exists():
             return ephemeral_path.read_text(encoding="utf-8")
         p = self._resolve_path(prompt_path, self.SEARCH_PATHS)
+        if not p.exists():
+            for candidate in [*list_prompt_files(PROMPT_DIR), *list_prompt_files(TEST_PROMPT_DIR)]:
+                if candidate.name == str(prompt_path or "").strip():
+                    p = candidate
+                    break
         if not p.exists():
             raise FileNotFoundError(f"提示词文件不存在: {prompt_path}")
         content = p.read_text(encoding="utf-8")

@@ -146,6 +146,14 @@ FEW_SHOT_DIR = _resolve_dir(
     ],
     fallback=VARIABLE_DIR / "示例——长文模式",
 )
+FEW_SHOT_LATEST_DIR = _resolve_dir(
+    "LONGFORM_FEW_SHOT_LATEST_DIR",
+    [
+        NARRATIVE_VAR_DIR / "示例——长文模式" / "最新版本",
+        FEW_SHOT_DIR / "最新版本",
+    ],
+    fallback=NARRATIVE_VAR_DIR / "示例——长文模式" / "最新版本",
+)
 PROFILE_PROMPT_DIR = _resolve_dir(
     "LONGFORM_PROFILE_PROMPT_DIR",
     [
@@ -253,18 +261,40 @@ def is_main_prompt_file(filename: str) -> bool:
     return parse_main_prompt_version(filename) is not None
 
 
-def list_main_prompt_files(prompt_dir: Path | None = None) -> list[Path]:
-    """仅返回主目录下符合命名规范的主提示词文件，按新到旧排序。"""
+ARCHIVED_PROMPT_DIR_KEYWORDS = ("归档", "archive")
+
+
+def is_archived_prompt_path(path: Path, root_dir: Path | None = None) -> bool:
+    """判断文件是否位于提示词归档目录下。"""
+    try:
+        parts = path.relative_to(root_dir).parts[:-1] if root_dir else path.parts[:-1]
+    except ValueError:
+        parts = path.parts[:-1]
+    return any(
+        keyword in str(part).lower()
+        for part in parts
+        for keyword in ARCHIVED_PROMPT_DIR_KEYWORDS
+    )
+
+
+def list_prompt_markdown_files(prompt_dir: Path | None = None) -> list[Path]:
+    """递归列出提示词 Markdown 文件，并跳过归档目录。"""
     target_dir = prompt_dir or PROMPT_DIR
     if not target_dir.exists():
         return []
+    return [
+        path
+        for path in target_dir.rglob("*.md")
+        if path.is_file() and not is_archived_prompt_path(path, target_dir)
+    ]
 
+
+def list_main_prompt_files(prompt_dir: Path | None = None) -> list[Path]:
+    """返回符合命名规范的主提示词文件，按新到旧排序。"""
     files = [
         path
-        for path in target_dir.iterdir()
-        if path.is_file()
-        and path.suffix.lower() == ".md"
-        and is_main_prompt_file(path.name)
+        for path in list_prompt_markdown_files(prompt_dir)
+        if is_main_prompt_file(path.name)
     ]
     files.sort(
         key=lambda path: (parse_main_prompt_version(path.name), path.name),
@@ -274,16 +304,8 @@ def list_main_prompt_files(prompt_dir: Path | None = None) -> list[Path]:
 
 
 def list_prompt_files(prompt_dir: Path | None = None) -> list[Path]:
-    """列出提示词目录文件，主提示词按版本优先，其他文档靠后。"""
-    target_dir = prompt_dir or PROMPT_DIR
-    if not target_dir.exists():
-        return []
-
-    files = [
-        path
-        for path in target_dir.iterdir()
-        if path.is_file() and path.suffix.lower() == ".md"
-    ]
+    """列出提示词文件，主提示词按版本优先，其他文档靠后。"""
+    files = list_prompt_markdown_files(prompt_dir)
     main_files = [path for path in files if is_main_prompt_file(path.name)]
     other_files = [path for path in files if not is_main_prompt_file(path.name)]
     main_files.sort(
