@@ -39,6 +39,11 @@ try:
 except ImportError:
     PromptService = None
 
+try:
+    from server.services.runtime_config import normalize_longform_config_contract
+except ImportError:
+    normalize_longform_config_contract = None
+
 
 def init_console_io():
     """尽量统一 stdout/stderr 编码，避免 Windows 控制台直接崩溃。"""
@@ -122,6 +127,21 @@ DEFAULT_PROMPT_FILE = SCRIPT_DIR / "prompt" / "星朋友长文模式_提示词_v
 DEFAULT_FEWSHOT_FILE = SCRIPT_DIR / "few_shot" / "长文模式_Few-shot示例库.md"
 QUALITY_GUARD = QualityGuard() if QualityGuard else None
 PROMPT_SERVICE = PromptService() if PromptService else None
+
+
+def normalize_cli_config(config: dict) -> dict:
+    """Keep CLI JSON/Excel configs aligned with the Web runtime contract."""
+    if normalize_longform_config_contract is None:
+        return config
+    normalized = normalize_longform_config_contract(config)
+    for key, value in config.items():
+        if key not in normalized:
+            normalized[key] = value
+    if config.get("_mode"):
+        normalized["_mode"] = config.get("_mode")
+    if config.get("_session_id"):
+        normalized["_session_id"] = config.get("_session_id")
+    return normalized
 
 # ── 固定消息模板（白皮书 v1.6 §3.6-3.10 + S1/S3/S5 首轮隔离修复）──────────
 FEW_SHOT_PREFIX_MSG = (
@@ -917,7 +937,7 @@ def load_config_from_excel(
     indep_count = sum(1 for c in configs if c["_mode"] == "independent")
     print(f"  [OK] 解析完成: {session_count} 个会话(方案B) + "
           f"{indep_count} 个独立行(方案A)")
-    return configs
+    return [normalize_cli_config(cfg) for cfg in configs]
 
 
 # ── 并发批量 (v1 能力迁移) ─────────────────────────────────────
@@ -1291,6 +1311,7 @@ def main():
         # ════════════ JSON 配置模式（原 v2）════════════
         with open(input_path, "r", encoding="utf-8") as f:
             config = json.load(f)
+        config = normalize_cli_config(config)
 
         if "prompt_file" not in config or "turns" not in config:
             print("[错误] JSON 必须包含 prompt_file 和 turns 字段")

@@ -180,6 +180,7 @@ class ModelAdapter:
     }
     GEMMA_MODEL_PREFIXES = ("gemma4-", "gemma-4-", "gemma4")
     THINKING_LEVELS = frozenset({"disabled", "low", "medium", "high", "max", "xhigh"})
+    DEFAULT_THINKING_EFFORTS = ("disabled", "low", "medium", "high", "max")
     # 打分/摘要等分析型场景的默认 Thinking 级别
     DEFAULT_THINKING_BY_MODEL = {
         "gemma4-31b": "high",
@@ -250,16 +251,21 @@ class ModelAdapter:
             "capabilities": {"web_search": False, "thinking": False},
         },
         "minimax-m27": {
+            # 2026-05-26 变更：原走 MiniMax 官方 Anthropic 兼容接口（Token Plan 已过期），
+            #                  改为阿里云 DashScope 调用。
+            # ⚠️ model_name 必须带 "MiniMax/" 前缀（稀宇科技部署），
+            #     与阿里云官方部署的 MiniMax-M2.5 不同。
             "name": "MiniMax-M2.7",
             "display_name": "MiniMax M2.7",
-            "provider": "minimax",
+            "provider": "aliyun",
             "api": {
-                "base_url": "https://api.minimaxi.com",
-                "api_key": "${MINIMAX_API_KEY}",
-                "model_name": "MiniMax-M2.7",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "${DASHSCOPE_API_KEY}",
+                "model_name": "MiniMax/MiniMax-M2.7",
             },
-            "parameters": {"temperature": 1.0, "max_completion_tokens": 4096, "top_p": 0.95},
-            "capabilities": {"web_search": False, "thinking": False},
+            "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 0.95},
+            "thinking": {"enabled": True},
+            "capabilities": {"web_search": False, "thinking": True},
         },
         "minimax-m25": {
             "name": "MiniMax-M2.5",
@@ -325,6 +331,22 @@ class ModelAdapter:
             "thinking": {"enabled": True},
             "capabilities": {"web_search": False, "thinking": True},
         },
+        "qwen3.7-max": {
+            # 2026-05-26 新增。复用 qwen3.6-plus 的 DASHSCOPE_API_KEY 来源。
+            # ⚠️ model_name 暂按 "qwen3.7-max" 命名推断，
+            #     若返回 model_not_found，请到百炼控制台查准确名称后修正。
+            "name": "qwen3.7-max",
+            "display_name": "千问 3.7 Max",
+            "provider": "aliyun",
+            "api": {
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "${DASHSCOPE_API_KEY}",
+                "model_name": "qwen3.7-max",
+            },
+            "parameters": {"temperature": 1.0, "max_tokens": 8192, "top_p": 0.95},
+            "thinking": {"enabled": True},
+            "capabilities": {"web_search": False, "thinking": True},
+        },
         "kimi-k25": {
             "name": "kimi-k2.5",
             "display_name": "Kimi K2.5",
@@ -338,17 +360,17 @@ class ModelAdapter:
             "capabilities": {"web_search": False, "thinking": True},
         },
         "deepseek-v3.1": {
-            "name": "deepseek-v3-1-terminus",
+            "name": "deepseek-ai/DeepSeek-V3.1",
             "display_name": "DeepSeek V3.1",
-            "provider": "volcengine",
+            "provider": "aliyun",
             "api": {
-                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-                "api_key_env": "VOLCENGINE_API_KEY",
-                "interface": "chat_completions",
-                "model": "deepseek-v3-1-terminus",
+                "base_url": "https://llm.bitleapai.cn/v1",
+                "api_key": "${DEEPSEEK_V31_API_KEY}",
+                "model_name": "deepseek-ai/DeepSeek-V3.1",
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 0.95},
-            "capabilities": {"web_search": False, "thinking": False},
+            "thinking": {"enabled": True, "supports_reasoning_effort": True},
+            "capabilities": {"web_search": False, "thinking": True},
         },
         "deepseek-v3.2": {
             "name": "deepseek-v3-2-251201",
@@ -361,20 +383,32 @@ class ModelAdapter:
                 "model": "deepseek-v3-2-251201",
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 0.95},
-            "capabilities": {"web_search": False, "thinking": False},
+            "thinking": {"enabled": True, "supports_reasoning_effort": True},
+            "capabilities": {"web_search": False, "thinking": True},
         },
         "deepseek-v4-flash": {
             "name": "deepseek-v4-flash",
             "display_name": "DeepSeek V4 Flash",
             "provider": "aliyun",
+            "tier": "pro",
             "api": {
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "api_key": "${DASHSCOPE_API_KEY}",
                 "model_name": "deepseek-v4-flash",
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 1.0},
-            "thinking": {"enabled": True, "supports_reasoning_effort": True},
-            "capabilities": {"web_search": False, "thinking": True},
+            "thinking": {
+                "enabled": True,
+                "supports_reasoning_effort": True,
+                "allowed_efforts": ["disabled", "high", "max"],
+                "default_effort": "high",
+            },
+            "capabilities": {
+                "web_search": False,
+                "thinking": True,
+                "thinking_efforts": ["disabled", "high", "max"],
+                "default_thinking_effort": "high",
+            },
         },
         "deepseek-v4-pro": {
             "name": "deepseek-v4-pro",
@@ -386,18 +420,28 @@ class ModelAdapter:
                 "model_name": "deepseek-v4-pro",
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 1.0},
-            "thinking": {"enabled": True, "supports_reasoning_effort": True},
-            "capabilities": {"web_search": False, "thinking": True},
+            "tier": "pro",
+            "thinking": {
+                "enabled": True,
+                "supports_reasoning_effort": True,
+                "allowed_efforts": ["disabled", "high", "max"],
+                "default_effort": "high",
+            },
+            "capabilities": {
+                "web_search": False,
+                "thinking": True,
+                "thinking_efforts": ["disabled", "high", "max"],
+                "default_thinking_effort": "high",
+            },
         },
         "deepseek-v3": {
-            "name": "deepseek-v3-250324",
+            "name": "xdeepseekv3",
             "display_name": "DeepSeek V3",
-            "provider": "volcengine",
+            "provider": "aliyun",
             "api": {
-                "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-                "api_key_env": "DEEPSEEK_API_KEY",
-                "interface": "chat_completions",
-                "model": "deepseek-v3-250324",
+                "base_url": "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+                "api_key": "${DEEPSEEK_V3_API_KEY}",
+                "model_name": "xdeepseekv3",
             },
             "parameters": {"temperature": 1.0, "max_tokens": 4096, "top_p": 0.95},
             "capabilities": {"web_search": False, "thinking": False},
@@ -415,6 +459,20 @@ class ModelAdapter:
             "thinking": {"enabled": True},
             "capabilities": {"web_search": False, "thinking": True},
         },
+        "glm-5.1": {
+            # 2026-05-26 新增。智谱 GLM 系列最新混合推理模型，每模型 100 万免费 Token。
+            "name": "glm-5.1",
+            "display_name": "GLM-5.1",
+            "provider": "aliyun",
+            "api": {
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "${DASHSCOPE_API_KEY}",
+                "model_name": "glm-5.1",
+            },
+            "parameters": {"temperature": 1.0, "max_tokens": 8192, "top_p": 0.95},
+            "thinking": {"enabled": True},
+            "capabilities": {"web_search": False, "thinking": True},
+        },
         "gemma4-31b": {
             "name": "gemma-4-31b-it",
             "display_name": "Gemma4 31B",
@@ -427,6 +485,24 @@ class ModelAdapter:
             "parameters": {"temperature": 1.0, "max_tokens": 8192, "top_p": 0.95},
             "thinking": {"enabled": True},
             "capabilities": {"web_search": False, "thinking": True},
+        },
+        "gemma4-31b-shortform": {
+            # 2026-05-26 新增。业务方短文模式专用微调部署。
+            # ⚠️ 端口 19010，model_name="gemma-4-31b"（带连字符）；与 19006/gemma4 区分。
+            # 默认 system prompt：日常模式/短文模式_Gemma4微调指令_v1.0_20260526.md
+            "name": "gemma4-31b-shortform",
+            "display_name": "Gemma4 31B 短文微调版",
+            "provider": "local_openai",
+            "api": {
+                "base_url": "http://115.190.27.75:19010/v1",
+                "api_key": "${LONGFORM_LOCAL_GEMMA_API_KEY}",
+                "model_name": "gemma-4-31b",
+                "interface": "chat_completions",
+            },
+            "parameters": {"temperature": 0.7, "max_tokens": 4096, "top_p": 0.95},
+            "rate_limit": {"retry_delays": [2, 5, 10]},
+            "capabilities": {"web_search": False, "thinking": False},
+            "recommended_mode": "shortform",
         },
         "gemma4-31b-local": {
             "name": "Gemma4 31B 本地版",
@@ -515,6 +591,56 @@ class ModelAdapter:
                 except Exception as e:
                     print(f"[警告] 加载模型配置失败 {yaml_file.name}: {e}")
 
+    @classmethod
+    def _thinking_capabilities_for_config(cls, model_id: str, cfg: dict | None = None) -> dict:
+        """Return normalized thinking capability metadata for UI and callers."""
+        normalized_model_id = cls.normalize_model_id(model_id)
+        config = cfg or cls.BUILTIN_MODELS.get(normalized_model_id, {}) or {}
+        caps = dict(config.get("capabilities", {}) or {})
+        thinking_cfg = dict(config.get("thinking", {}) or {})
+        supports_thinking = bool(caps.get("thinking", thinking_cfg.get("enabled", False)))
+        if not supports_thinking:
+            return {
+                "thinking": False,
+                "supports_reasoning_effort": False,
+                "thinking_efforts": ["disabled"],
+                "default_thinking_effort": "disabled",
+            }
+
+        raw_efforts = (
+            thinking_cfg.get("allowed_efforts")
+            or caps.get("thinking_efforts")
+            or cls.DEFAULT_THINKING_EFFORTS
+        )
+        efforts: list[str] = []
+        for effort in raw_efforts:
+            normalized = str(effort or "").strip().lower()
+            if normalized == "xhigh":
+                normalized = "max"
+            if normalized in cls.THINKING_LEVELS and normalized not in efforts:
+                efforts.append(normalized)
+        if "disabled" not in efforts:
+            efforts.insert(0, "disabled")
+        if not efforts:
+            efforts = ["disabled"]
+
+        default_effort = str(
+            thinking_cfg.get("default_effort")
+            or caps.get("default_thinking_effort")
+            or cls.DEFAULT_THINKING_BY_MODEL.get(normalized_model_id, "high")
+        ).strip().lower()
+        if default_effort == "xhigh":
+            default_effort = "max"
+        if default_effort not in efforts:
+            default_effort = next((item for item in efforts if item != "disabled"), "disabled")
+
+        return {
+            "thinking": True,
+            "supports_reasoning_effort": bool(thinking_cfg.get("supports_reasoning_effort", False)),
+            "thinking_efforts": efforts,
+            "default_thinking_effort": default_effort,
+        }
+
     def list_models(self, *, include_hidden: bool = False) -> list[dict]:
         """返回可用模型列表（含能力矩阵）"""
         result = []
@@ -522,14 +648,16 @@ class ModelAdapter:
             if not include_hidden and bool(cfg.get("ui_hidden", False)):
                 continue
             caps = cfg.get("capabilities", {})
+            thinking_caps = self._thinking_capabilities_for_config(model_id, cfg)
             item = {
                 "id": model_id,
                 "name": cfg.get("name", model_id),
                 "display_name": cfg.get("display_name", model_id),
                 "provider": cfg.get("provider", "unknown"),
+                "tier": str(cfg.get("tier", "") or "").strip(),
                 "capabilities": {
                     "web_search": caps.get("web_search", False),
-                    "thinking": caps.get("thinking", False),
+                    **thinking_caps,
                 },
             }
             status = str(cfg.get("status", "") or "").strip()
@@ -660,10 +788,14 @@ class ModelAdapter:
             normalized = "max"
         if normalized not in cls.THINKING_LEVELS:
             normalized = "disabled"
+        capability = cls._thinking_capabilities_for_config(model_id)
+        allowed = set(capability.get("thinking_efforts", []) or ["disabled"])
+        if normalized not in allowed:
+            normalized = str(capability.get("default_thinking_effort") or "disabled")
         model_default = cls.DEFAULT_THINKING_BY_MODEL.get(cls.normalize_model_id(model_id))
-        if normalized == "disabled" and model_default:
+        if normalized == "disabled" and model_default and model_default in allowed:
             return model_default
-        return normalized
+        return normalized if normalized in allowed else "disabled"
 
     @classmethod
     def resolve_thinking_effort(
@@ -681,8 +813,9 @@ class ModelAdapter:
             return "disabled"
         if thinking_enabled is True:
             if normalized_effort != "disabled":
-                return normalized_effort
-            return cls.DEFAULT_THINKING_BY_MODEL.get(cls.normalize_model_id(model_id), "high")
+                return cls.normalize_thinking_effort(model_id, normalized_effort)
+            capability = cls._thinking_capabilities_for_config(model_id)
+            return str(capability.get("default_thinking_effort") or "high")
         return cls.normalize_thinking_effort(model_id, normalized_effort)
 
     def chat(self, model_id: str, messages: list[dict],

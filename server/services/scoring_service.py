@@ -709,12 +709,14 @@ class ScoringService:
             "messages": messages,
         }
         provider = self._resolve_scoring_provider(model_alias)
+        model_cfg = self._get_model_config(model_alias)
+        thinking_cfg = dict(model_cfg.get("thinking", {}) or {})
         if (
             thinking_effort
             and thinking_effort != "disabled"
             and self._model_supports_thinking(model_alias)
         ):
-            if provider in {"google", "google_gemini", "nvidia"}:
+            if bool(thinking_cfg.get("supports_reasoning_effort", False)):
                 request_kwargs["reasoning_effort"] = thinking_effort
             elif provider in {"aliyun", "dashscope", "volcengine", ""}:
                 budget_map = {"low": 256, "medium": 1024, "high": 4096}
@@ -1469,6 +1471,183 @@ class ScoringService:
         return items
 
     @staticmethod
+    def _safe_float(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _diagnose_failure_type(status: str, reasoning: str, error: str = "") -> str:
+        text = f"{reasoning} {error}".strip().lower()
+        if status in {"unscored", "pending"}:
+            return "pending_scoring"
+        if status == "skipped":
+            return "skipped_empty_output" if "为空" in text or "empty" in text else "skipped"
+        if "timeout" in text or "timed out" in text or "超时" in text:
+            return "timeout"
+        if "json" in text or "解析" in text or "parse" in text:
+            return "parse_error"
+        if "429" in text or "rate limit" in text or "限流" in text:
+            return "rate_limited"
+        if "5xx" in text or "500" in text or "上游" in text:
+            return "upstream_error"
+        if status == "failed":
+            return "scoring_failed"
+        return ""
+
+    @staticmethod
+    def _normalise_scored_item(item: dict, dimension_order: list[str] | tuple[str, ...]) -> dict:
+        raw_status = str(item.get("status", item.get("score_status", "")) or "").strip().lower()
+        success = raw_status == "scored" or bool(item.get("success", False))
+        status = "scored" if success else (raw_status or "unscored")
+        scores = dict(item.get("scores", {}) or {})
+        if not scores:
+            scores = {
+                key: item.get(f"score_{key}", 0)
+                for key in dimension_order
+            }
+        total = ScoringService._safe_float(
+            item.get("mapped_total", item.get("score_total", item.get("total", 0))),
+        )
+        reasoning = str(item.get("reasoning", item.get("score_reasoning", "")) or "").strip()
+        return {
+            "turn": item.get("turn"),
+            "status": status,
+            "success": success,
+            "total": total,
+            "scores": scores,
+            "reasoning": reasoning,
+            "error": str(item.get("error", "") or "").strip(),
+        }
+
+    @staticmethod
+    def build_scoring_diagnostics(
+        scored_items: list[dict],
+        dimension_order: list[str] | tuple[str, ...],
+        *,
+        pass_threshold: float = 8.0,
+        low_dimension_threshold: float = 3.5,
+    ) -> dict:
+        """从现有评分结果构建详情证据链、失败诊断和低分聚类，不发起模型调用。"""
+        dimensions = list(dimension_order or [])
+        if not dimensions:
+            for item in scored_items:
+                scores = dict(item.get("scores", {}) or {})
+                for key in scores.keys():
+                    if key not in dimensions:
+                        dimensions.append(key)
+        normalised = [
+            ScoringService._normalise_scored_item(item, dimensions)
+            for item in scored_items
+        ]
+
+        evidence_chain: list[dict] = []
+        failure_map: dict[str, dict] = {}
+        cluster_map: dict[str, dict] = {}
+        status_counts: dict[str, int] = {}
+
+        for item in normalised:
+            status = item["status"]
+            status_counts[status] = status_counts.get(status, 0) + 1
+            scores = {
+                key: ScoringService._safe_float(item["scores"].get(key, 0))
+                for key in dimensions
+            }
+            weakest = sorted(
+                [
+                    {"dimension": key, "score": round(value, 2)}
+                    for key, value in scores.items()
+                ],
+                key=lambda row: row["score"],
+            )[:3]
+            failure_type = ScoringService._diagnose_failure_type(
+                status,
+                item["reasoning"],
+                item["error"],
+            )
+            evidence = {
+                "turn": item["turn"],
+                "status": status,
+                "total": round(item["total"], 2) if item["success"] else None,
+                "weakest_dimensions": weakest if item["success"] else [],
+                "failure_type": failure_type,
+                "reasoning_excerpt": item["reasoning"][:240],
+            }
+            evidence_chain.append(evidence)
+
+            if failure_type:
+                bucket = failure_map.setdefault(
+                    failure_type,
+                    {
+                        "type": failure_type,
+                        "count": 0,
+                        "turns": [],
+                        "sample_reasoning": "",
+                    },
+                )
+                bucket["count"] += 1
+                bucket["turns"].append(item["turn"])
+                if not bucket["sample_reasoning"]:
+                    bucket["sample_reasoning"] = item["reasoning"][:240]
+
+            if not item["success"] or item["total"] >= pass_threshold:
+                continue
+            low_dimensions = [
+                key for key, value in scores.items()
+                if value <= low_dimension_threshold
+            ]
+            if not low_dimensions and weakest:
+                low_dimensions = [weakest[0]["dimension"]]
+            for key in low_dimensions:
+                bucket = cluster_map.setdefault(
+                    key,
+                    {
+                        "cluster": key,
+                        "count": 0,
+                        "turns": [],
+                        "avg_total": 0.0,
+                        "avg_dimension_score": 0.0,
+                        "sample_reasoning": "",
+                        "_total_sum": 0.0,
+                        "_dimension_sum": 0.0,
+                    },
+                )
+                bucket["count"] += 1
+                bucket["turns"].append(item["turn"])
+                bucket["_total_sum"] += item["total"]
+                bucket["_dimension_sum"] += scores.get(key, 0)
+                if not bucket["sample_reasoning"]:
+                    bucket["sample_reasoning"] = item["reasoning"][:240]
+
+        low_score_clusters = []
+        for bucket in cluster_map.values():
+            count = max(1, int(bucket["count"]))
+            low_score_clusters.append(
+                {
+                    "cluster": bucket["cluster"],
+                    "count": bucket["count"],
+                    "turns": bucket["turns"],
+                    "avg_total": round(bucket["_total_sum"] / count, 2),
+                    "avg_dimension_score": round(bucket["_dimension_sum"] / count, 2),
+                    "sample_reasoning": bucket["sample_reasoning"],
+                }
+            )
+        low_score_clusters.sort(key=lambda row: (-int(row["count"]), row["cluster"]))
+
+        return {
+            "evidence_chain": evidence_chain,
+            "failure_diagnostics": {
+                "status_counts": status_counts,
+                "failure_types": sorted(
+                    failure_map.values(),
+                    key=lambda row: (-int(row["count"]), row["type"]),
+                ),
+            },
+            "low_score_clusters": low_score_clusters,
+        }
+
+    @staticmethod
     def _build_summary_report_meta(
         scored_items: list[dict],
         success_items: list[dict],
@@ -1606,7 +1785,15 @@ class ScoringService:
         self._ensure_loaded(require_api_key=False)
         success_items = [it for it in scored_items if it.get("success", False)]
         if not success_items:
-            return {"error": "无有效打分数据，无法生成 AI 摘要"}
+            diagnostics = self.build_scoring_diagnostics(
+                scored_items,
+                list((self._config or {}).get("dimensions", []) or [])
+                or list((self._config or {}).get("weights", {}).keys()),
+            )
+            return {
+                "error": "无有效打分数据，无法生成 AI 摘要",
+                **diagnostics,
+            }
 
         # 并发去重：同一 conversation_id 只允许一个 LLM 调用在跑
         lock_key = f"scoring_report_{conversation_id}" if conversation_id else ""
@@ -1650,6 +1837,12 @@ class ScoringService:
                     prompt_filename,
                 )
             )
+            diagnostics = self.build_scoring_diagnostics(
+                scored_items,
+                list((self._config or {}).get("dimensions", []) or [])
+                or list((self._config or {}).get("weights", {}).keys())
+                or list((success_items[0].get("scores", {}) or {}).keys() if success_items else []),
+            )
             cached = db.get_ai_report_summary(
                 target_type="conversation_scoring",
                 target_id=conversation_id,
@@ -1677,6 +1870,7 @@ class ScoringService:
                     "role_name": config.get("character", {}).get("Role_Nickname", "") or "未知角色",
                     "prompt_name": config.get("prompt_file", "") or "",
                     "cached": True,
+                    **diagnostics,
                 }
             return await self._generate_scoring_report_inner(
                 scored_items, success_items, config,
@@ -1702,6 +1896,12 @@ class ScoringService:
             or list((self._config or {}).get("weights", {}).keys())
             or list((success_items[0].get("scores", {}) or {}).keys() if success_items else []),
         )
+        diagnostics = self.build_scoring_diagnostics(
+            scored_items,
+            list((self._config or {}).get("dimensions", []) or [])
+            or list((self._config or {}).get("weights", {}).keys())
+            or list((success_items[0].get("scores", {}) or {}).keys() if success_items else []),
+        )
         return {
             "report_title": report_meta.get("report_title", ""),
             "generation_model": report_meta.get("generation_model", ""),
@@ -1710,6 +1910,7 @@ class ScoringService:
             "relationship": dict(config.get("context", {}) or {}).get("relationship", ""),
             "dimension_stats": dimension_stats,
             "case_items": case_items,
+            **diagnostics,
         }
 
     async def _generate_scoring_report_inner(
@@ -1737,6 +1938,12 @@ class ScoringService:
         report_meta["progress_summary"] = f"已评分 {len(success_items)} / 总轮数 {len(scored_items)}"
         dimension_stats = self._build_summary_dimension_stats(success_items)
         case_items = self._build_summary_case_items(
+            scored_items,
+            list((self._config or {}).get("dimensions", []) or [])
+            or list((self._config or {}).get("weights", {}).keys())
+            or list((success_items[0].get("scores", {}) or {}).keys() if success_items else []),
+        )
+        diagnostics = self.build_scoring_diagnostics(
             scored_items,
             list((self._config or {}).get("dimensions", []) or [])
             or list((self._config or {}).get("weights", {}).keys())
@@ -1775,6 +1982,7 @@ class ScoringService:
                     "role_name": config.get("character", {}).get("Role_Nickname", "") or "未知角色",
                     "prompt_name": config.get("prompt_file", "") or "",
                     "cached": True,
+                    **diagnostics,
                 }
         prompt = self._fill_prompt_template(
             template,
@@ -1782,6 +1990,7 @@ class ScoringService:
                 "report_meta_json": json.dumps(report_meta, ensure_ascii=False, indent=2),
                 "dimension_stats_json": json.dumps(dimension_stats, ensure_ascii=False, indent=2),
                 "case_items_json": json.dumps(case_items, ensure_ascii=False, indent=2),
+                "diagnostics_json": json.dumps(diagnostics, ensure_ascii=False, indent=2),
             },
         )
         try:
@@ -1794,6 +2003,7 @@ class ScoringService:
         except Exception as exc:
             return {
                 "error": str(exc),
+                **diagnostics,
             }
         if conversation_id:
             db.save_ai_report_summary(
@@ -1823,6 +2033,7 @@ class ScoringService:
             "role_name": config.get("character", {}).get("Role_Nickname", "") or "未知角色",
             "prompt_name": config.get("prompt_file", "") or "",
             "cached": False,
+            **diagnostics,
         }
 
     async def generate_compare_report(

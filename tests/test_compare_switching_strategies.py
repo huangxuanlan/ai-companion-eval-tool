@@ -95,11 +95,23 @@ def test_sandwich_history_normalizes_boundaries_and_same_role_runs():
 
     bridged = module.sandwich_history(raw, "long", 5)
     roles = [msg["role"] for msg in bridged]
+    merged_text = "\n".join(msg["content"] for msg in bridged)
 
-    assert roles == ["user", "assistant"]
-    assert "短文回复1" in bridged[1]["content"]
-    assert "短文回复2" in bridged[1]["content"]
-    assert "未回答用户" not in "\n".join(msg["content"] for msg in bridged)
+    # F5 修复后开头孤立 assistant 不再被丢弃，而是补占位 user 保留历史；
+    # 同 role 连跑仍会合并，末尾的孤立 user 被剔除。
+    assert roles[0] == "user"
+    assert roles[-1] == "assistant"
+    assert all(
+        roles[i] != roles[i + 1] for i in range(len(roles) - 1)
+    ), f"sandwich 后不应有连续相同 role: {roles}"
+    assert "孤立assistant" in merged_text and "连续assistant" in merged_text
+    assert "短文回复1" in merged_text and "短文回复2" in merged_text
+    last_assistant_content = next(
+        msg["content"] for msg in reversed(bridged) if msg["role"] == "assistant"
+    )
+    assert "短文回复1" in last_assistant_content
+    assert "短文回复2" in last_assistant_content
+    assert "未回答用户" not in merged_text
 
 
 def test_evaluate_output_uses_declared_word_ranges():
@@ -128,6 +140,8 @@ def test_cli_dry_run_smoke_writes_structure_results(tmp_path):
         ],
         cwd=PROJECT_ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

@@ -251,6 +251,7 @@ def test_runtime_messages_keep_memory_single_injection_across_model_branches():
         "dialogueStartPrompt": "PROFILE_ONLY_ONCE_456",
         "moments": "MOMENTS_ONLY_ONCE_456",
         "dialogue_summary": "SUMMARY_ONLY_ONCE_456",
+        "switch_state": "",
     }
 
     for model_id in ("doubao-pro-32k", "qwen3.6-plus", "gemma4-31b"):
@@ -352,6 +353,7 @@ def test_run_conversation_preserves_seed_summary_single_injection_across_model_b
         "dialogueStartPrompt": "PROFILE_RUNTIME_ONCE_789",
         "moments": "MOMENTS_RUNTIME_ONCE_789",
         "dialogue_summary": "SUMMARY_RUNTIME_ONCE_789",
+        "switch_state": "",
     }
     first_turn_text = "\n".join(
         str(msg.get("content", ""))
@@ -371,6 +373,8 @@ def test_run_conversation_preserves_seed_summary_single_injection_across_model_b
         for msg in second_snapshot["messages"]
     )
     for token in expected_snapshot.values():
+        if not token:
+            continue
         assert merged_text.count(token) == 1, f"{model_id} 中 {token} 被重复注入"
 
 

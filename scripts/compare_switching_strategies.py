@@ -20,6 +20,17 @@ import os
 import re
 import sys
 import time
+
+# Windows 默认 GBK stdout 无法编码 emoji（❗/⚠️ 等），输出前强制切到 UTF-8。
+if sys.platform.startswith("win"):
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (LookupError, OSError, ValueError):
+                pass
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -817,7 +828,7 @@ def main():
             )
             print(f"  摘要长度: {len(summary)}字")
 
-            print(f"  生成互动要点（deepseek-v4-flash，⚠️ MECE S6 仅短→长用，长→短为研究对比）...")
+            print("  生成互动要点（deepseek-v4-flash，[!] MECE S6 仅短→长用，长→短为研究对比）...")
             points = (
                 "【最近互动要点（桥接迁移）】\n1. [04-20 14:00] dry-run互动要点\n"
                 "【待接续线索】\n【最后场景】"

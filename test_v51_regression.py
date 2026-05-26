@@ -37,7 +37,11 @@ from config import (  # noqa: E402
     DEFAULT_INJECTION_DEPTH,
     DEFAULT_PROMPT_FILE,
     DEFAULT_SUMMARY_INTERVAL,
+    get_latest_prompt_file,
 )
+# 测试用 prompt_version 优先指向真实存在的最新版本，避免 DEFAULT_PROMPT_FILE
+# 配置滞后于实际目录时整组测试因 "提示词版本不存在" 失败。
+DEFAULT_PROMPT_FILE = get_latest_prompt_file() or DEFAULT_PROMPT_FILE  # noqa: E402
 from main import app  # noqa: E402
 from models import (  # noqa: E402
     OrchestrationGroupRequest,
@@ -1469,14 +1473,21 @@ def test_prompt_template_variable_replacement_and_interactive_generate(
             and request_payload_snapshot["top_p"] == 0.75,
             "request_payload_snapshot 未记录运行时采样参数",
         )
-        assert_true(len(adapter.calls) == 1, "模型调用次数异常")
+        # generate 路径会触发 summary 调度共享 mock adapter，只校验主模型调用；
+        # 主模型调用以最后一次 doubao-pro 调用为准。
+        primary_calls = [call for call in adapter.calls if call["model_id"] == "doubao-pro"]
         assert_true(
-            adapter.calls[0]["kwargs"].get("thinking_effort") == "disabled",
+            bool(primary_calls),
+            f"未捕获到主模型 doubao-pro 调用: model_ids={[c['model_id'] for c in adapter.calls]}",
+        )
+        primary_call = primary_calls[-1]
+        assert_true(
+            primary_call["kwargs"].get("thinking_effort") == "disabled",
             "非 Gemma4 31B 模型的默认 thinking_effort 不应被强制改写",
         )
         assert_true(
-            adapter.calls[0]["kwargs"].get("temperature") == 0.55
-            and adapter.calls[0]["kwargs"].get("top_p") == 0.75,
+            primary_call["kwargs"].get("temperature") == 0.55
+            and primary_call["kwargs"].get("top_p") == 0.75,
             "运行时 temperature/top_p 未透传到模型调用",
         )
     finally:
@@ -1911,11 +1922,14 @@ def test_history_list_supports_partial_model_filter(client: TestClient):
 
 
 def test_root_redirect_uses_latest_app_shell_version(client: TestClient):
+    from main import APP_SHELL_VERSION
+
     response = client.get("/", follow_redirects=False)
 
     assert_true(response.status_code in {302, 307}, response.text)
     assert_true(
-        response.headers.get("location", "") == "/static/index.html?v=93",
+        response.headers.get("location", "")
+        == f"/static/index.html?v={APP_SHELL_VERSION}",
         response.headers,
     )
 
@@ -2763,6 +2777,51 @@ def test_latest_orchestration_route_returns_completed_run_when_no_active(client:
     assert_true(payload["groups"][0]["items"][0]["status"] == "completed", payload)
 
 
+def test_orchestration_config_snapshot_is_public_and_listed(client: TestClient):
+    response = client.post(
+        "/api/orchestrations",
+        json={
+            "kind": "batch",
+            "title": "配置快照测试",
+            "concurrency": 2,
+            "config_snapshot": {
+                "model_id": "deepseek-v4-pro",
+                "thinking_effort": "max",
+                "auto_scoring": True,
+            },
+            "groups": [
+                {
+                    "key": "role:1",
+                    "label": "角色一",
+                    "relationship": "暧昧",
+                    "planned_turns": 1,
+                    "items": [
+                        {
+                            "key": "role:1:item:1",
+                            "label": "角色一",
+                            "relationship": "暧昧",
+                            "model_id": "deepseek-v4-pro",
+                            "planned_turns": 1,
+                            "payload": {"dry_run": True},
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    assert_true(response.status_code == 200, response.text)
+    payload = response.json()
+    assert_true(payload["config_snapshot"]["thinking_effort"] == "max", payload)
+    assert_true(payload["manifest"]["config_snapshot"]["model_id"] == "deepseek-v4-pro", payload)
+
+    list_response = client.get("/api/orchestrations", params={"kind": "batch", "limit": 5})
+    assert_true(list_response.status_code == 200, list_response.text)
+    runs = list_response.json()["runs"]
+    matched = [item for item in runs if item["id"] == payload["id"]]
+    assert_true(bool(matched), runs)
+    assert_true(matched[0]["config_snapshot"]["auto_scoring"] is True, matched[0])
+
+
 def test_orchestration_control_pause_route_updates_status(client: TestClient):
     run = create_test_orchestration_run(kind="batch", status="running", item_status="running", title="可暂停批量任务")
 
@@ -3080,7 +3139,7 @@ def test_interactive_conversation_session_flow(client: TestClient):
     payload = {
         "model_id": "doubao-pro",
         "model_mini": "doubao-mini",
-        "prompt_version": "v2.0",
+        "prompt_version": DEFAULT_PROMPT_FILE,
         "summary_interval": 5,
         "injection_depth": 4,
         "character": {
@@ -3239,7 +3298,7 @@ def test_interactive_generate_surfaces_model_failure(client: TestClient, monkeyp
     payload = {
         "model_id": "doubao-pro",
         "model_mini": "doubao-mini",
-        "prompt_version": "v2.0",
+        "prompt_version": DEFAULT_PROMPT_FILE,
         "summary_interval": 5,
         "injection_depth": 4,
         "character": {

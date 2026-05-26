@@ -67,9 +67,10 @@ def test_minimax_models_registered(client: TestClient):
     m27 = models["minimax-m27"]
     doubao_character = models["doubao-1.5-character"]
     assert m27["display_name"] == "MiniMax M2.7"
-    assert m27["capabilities"]["thinking"] is False
+    # 2026-05-26 切阿里云 DashScope 兼容接口（Token Plan 过期），保留思考能力。
+    assert m27["capabilities"]["thinking"] is True
     assert m27["capabilities"]["web_search"] is False
-    assert m27["provider"] == "minimax"
+    assert m27["provider"] == "aliyun"
     assert doubao_character["provider"] == "volcengine"
     assert doubao_character["capabilities"]["thinking"] is False
 
@@ -94,7 +95,8 @@ def test_doubao_15_character_builtin_uses_chat_completions():
 
 
 def test_minimax_provider_merges_multiple_system_messages():
-    provider = ModelAdapter()._get_provider("minimax-m27")
+    # m27 已切阿里云，仍用 MinimaxProvider 的 minimax-her 验证 system 合并逻辑。
+    provider = ModelAdapter()._get_provider("minimax-her")
     converted = provider._convert_messages([
         {"role": "system", "content": "系统约束 A"},
         {"role": "system", "content": "系统约束 B"},

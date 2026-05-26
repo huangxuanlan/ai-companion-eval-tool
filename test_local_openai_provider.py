@@ -255,6 +255,10 @@ def test_interactive_generate_defaults_gemma_local_to_high_thinking(tmp_path: Pa
     finally:
         conversations_router._conv_service = None
 
-    assert adapter.calls
-    assert all(call["model_id"] == "gemma4-31b-local" for call in adapter.calls)
-    assert all(call["kwargs"]["thinking_effort"] == "high" for call in adapter.calls)
+    assert adapter.calls, f"adapter 未捕获任何调用: model_ids={[c.get('model_id') for c in adapter.calls]}"
+    primary_calls = [call for call in adapter.calls if call["model_id"] == "gemma4-31b-local"]
+    assert primary_calls, (
+        "未捕获到 gemma4-31b-local 主模型调用: "
+        f"all_model_ids={[c.get('model_id') for c in adapter.calls]}"
+    )
+    assert all(call["kwargs"]["thinking_effort"] == "high" for call in primary_calls)
