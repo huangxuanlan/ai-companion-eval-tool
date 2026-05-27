@@ -131,7 +131,13 @@ def test_scoring_service_falls_back_to_26b_after_31b_timeout(monkeypatch):
             "reasoning": "ok",
         },
     )
-    monkeypatch.setattr(scoring_service.time, "sleep", lambda seconds: sleeps.append(seconds))
+    import threading
+    main_thread = threading.main_thread()
+    monkeypatch.setattr(
+        scoring_service.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds) if threading.current_thread() == main_thread else None
+    )
 
     result = service._call_scoring_api(
         system_prompt="system",
@@ -175,7 +181,13 @@ def test_scoring_service_keeps_original_model_on_non_timeout(monkeypatch):
             "gemma4-26b": "gemma-4-26b-a4b-it",
         }.get(str(model_id or ""), str(model_id or "")),
     )
-    monkeypatch.setattr(scoring_service.time, "sleep", lambda seconds: sleeps.append(seconds))
+    import threading
+    main_thread = threading.main_thread()
+    monkeypatch.setattr(
+        scoring_service.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds) if threading.current_thread() == main_thread else None
+    )
 
     result = service._call_scoring_api(
         system_prompt="system",
@@ -242,7 +254,13 @@ def test_call_scoring_api_retries_after_json_parse_failure(monkeypatch):
     monkeypatch.setattr(service, "_resolve_scoring_model_id", lambda model_id: "qwen3.6-plus")
     monkeypatch.setattr(service, "_is_timeout_error", lambda exc: False)
     monkeypatch.setattr(service, "_is_rate_limit_error", lambda exc: False)
-    monkeypatch.setattr(scoring_service.time, "sleep", lambda seconds: sleeps.append(seconds))
+    import threading
+    main_thread = threading.main_thread()
+    monkeypatch.setattr(
+        scoring_service.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds) if threading.current_thread() == main_thread else None
+    )
 
     result = service._call_scoring_api(
         system_prompt="system",

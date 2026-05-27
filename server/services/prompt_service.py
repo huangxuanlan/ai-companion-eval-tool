@@ -10,6 +10,7 @@ from pathlib import Path
 from config import (
     PROMPT_DIR,
     TEST_PROMPT_DIR,
+    SHORTFORM_PROMPT_DIR,
     VARIABLE_DIR,
     NARRATIVE_VAR_DIR,
     PROJECT_DIR,
@@ -24,11 +25,12 @@ from services.public_demo import resolve_ephemeral_prompt_path
 class PromptService:
     """提示词模板加载、渲染、变量注入"""
 
-    # 搜索路径：脚本目录 → 提示词目录 → 测试提示词目录
+    # 搜索路径：脚本目录 → 提示词目录 → 测试提示词目录 → 短文提示词目录
     SEARCH_PATHS = [
         PROJECT_DIR,
         PROMPT_DIR,
         TEST_PROMPT_DIR,
+        SHORTFORM_PROMPT_DIR,
     ]
 
     FEW_SHOT_LATEST_DIR = FEW_SHOT_LATEST_DIR
@@ -494,7 +496,11 @@ class PromptService:
             return ephemeral_path.read_text(encoding="utf-8")
         p = self._resolve_path(prompt_path, self.SEARCH_PATHS)
         if not p.exists():
-            for candidate in [*list_prompt_files(PROMPT_DIR), *list_prompt_files(TEST_PROMPT_DIR)]:
+            for candidate in [
+                *list_prompt_files(PROMPT_DIR),
+                *list_prompt_files(TEST_PROMPT_DIR),
+                *list_prompt_files(SHORTFORM_PROMPT_DIR),
+            ]:
                 if candidate.name == str(prompt_path or "").strip():
                     p = candidate
                     break

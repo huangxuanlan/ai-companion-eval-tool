@@ -180,12 +180,17 @@ def test_interactive_conversation_defaults_scoring_model_to_default_scoring_mode
 def test_conversation_detail_exposes_score_avg_after_turn_scoring():
     with TestClient(app) as client:
         create_response = client.post(
-            "/api/conversations",
+            "/api/conversations/interactive",
             json={
-                "preset_id": "xiaoJingYan",
                 "model_id": "doubao-pro",
-                "dry_run": True,
-                "turns": ["明细分数回填校验"],
+                "character": {
+                    "Role_Nickname": "萧璟言",
+                    "personality": "冷静",
+                },
+                "context": {
+                    "relationship": "朋友",
+                },
+                "modules": {},
             },
         )
 
@@ -253,12 +258,17 @@ def test_scoring_config_route_updates_max_workers(monkeypatch):
 def test_scoring_results_summary_counts_skipped_turns():
     with TestClient(app) as client:
         create_response = client.post(
-            "/api/conversations",
+            "/api/conversations/interactive",
             json={
-                "preset_id": "xiaoJingYan",
                 "model_id": "doubao-pro",
-                "dry_run": True,
-                "turns": ["skip 统计校验"],
+                "character": {
+                    "Role_Nickname": "萧璟言",
+                    "personality": "冷静",
+                },
+                "context": {
+                    "relationship": "朋友",
+                },
+                "modules": {},
             },
         )
         assert create_response.status_code == 200, create_response.text
@@ -298,12 +308,17 @@ def test_scoring_results_summary_counts_skipped_turns():
 def test_conversation_list_exposes_zero_score_for_skipped_only_conversation():
     with TestClient(app) as client:
         create_response = client.post(
-            "/api/conversations",
+            "/api/conversations/interactive",
             json={
-                "preset_id": "xiaoJingYan",
                 "model_id": "doubao-pro",
-                "dry_run": True,
-                "turns": ["skip 列表均分回填校验"],
+                "character": {
+                    "Role_Nickname": "萧璟言",
+                    "personality": "冷静",
+                },
+                "context": {
+                    "relationship": "朋友",
+                },
+                "modules": {},
             },
         )
         assert create_response.status_code == 200, create_response.text

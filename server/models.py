@@ -40,6 +40,7 @@ class ConversationCreate(BaseModel):
     context: Optional[dict] = None
     modules: Optional[dict] = None
     custom_variables: Optional[dict] = Field(default_factory=dict)
+    mode: Optional[str] = "long"
 
 
 class PresetCreate(BaseModel):
@@ -48,6 +49,7 @@ class PresetCreate(BaseModel):
     name: str
     type: str
     config: dict
+    mode: Optional[str] = "long"
 
 
 class ChatRequest(BaseModel):
@@ -172,6 +174,7 @@ class InteractiveConversationCreate(BaseModel):
     custom_variables: dict = Field(default_factory=dict)
     ab_session_id: Optional[str] = None
     ab_variant: Optional[Literal["base", "compare"]] = None
+    mode: Optional[str] = "long"
 
 
 class ABSessionCreateRequest(BaseModel):
@@ -307,6 +310,7 @@ class ConfigSaveRequest(BaseModel):
     modules: Optional[dict] = None
     runtime: Optional[dict] = None
     custom_variables: Optional[dict] = Field(default_factory=dict)
+    mode: Optional[str] = "long"
 
 
 class PresetResponse(BaseModel):

@@ -1,4 +1,4 @@
-﻿"""
+"""
 对话路由 — /api/conversations + WebSocket
 
 REST 端点 + WebSocket 实时推送。
@@ -111,6 +111,7 @@ def _create_conversation_record(
     preset_id: str | None = None,
     model_mini: str | None = None,
     prompt_version: str = "",
+    mode: str = "long",
 ) -> str:
     return _call_conv_service(
         "create_conversation",
@@ -120,6 +121,7 @@ def _create_conversation_record(
         preset_id=preset_id,
         model_mini=model_mini,
         prompt_version=prompt_version,
+        mode=mode,
     )
 
 
@@ -677,6 +679,7 @@ async def _schedule_conversation_run(
     scoring_retry_count: int | None = None,
     dry_run: bool,
     compare_mode: str,
+    mode: str = "long",
 ) -> dict:
     requested_prompt, resolved_model_mini = _build_runtime_config(
         config=config,
@@ -718,6 +721,7 @@ async def _schedule_conversation_run(
         preset_id=preset_ref,
         model_mini=resolved_model_mini,
         prompt_version=requested_prompt,
+        mode=mode,
     )
     status, queue_position = await _start_conversation_run(
         conv_id=conv_id,
@@ -827,6 +831,7 @@ async def create_conversation(data: ConversationCreate):
                     top_p=data.top_p,
                     dry_run=data.dry_run,
                     compare_mode=data.compare_mode or "",
+                    mode=data.mode or "long",
                 )
             )
         overall_status = "queued" if any(item["status"] == "queued" for item in conversations) else "pending"
@@ -865,6 +870,7 @@ async def create_conversation(data: ConversationCreate):
         top_p=data.top_p,
         dry_run=data.dry_run,
         compare_mode=data.compare_mode or "",
+        mode=data.mode or "long",
     )
 
     return {
@@ -935,6 +941,7 @@ async def create_interactive_conversation(data: InteractiveConversationCreate):
         config=config,
         model_mini=model_mini,
         prompt_version=requested_prompt,
+        mode=data.mode or "long",
     )
     if not previous_summary:
         service = _get_conv_service()
@@ -975,6 +982,7 @@ async def append_interactive_turn(conv_id: str, data: InteractiveTurnCreate):
         "messages_snapshot": data.messages_snapshot,
         "request_payload_snapshot": data.request_payload_snapshot,
         "model_id": data.model_id or conversation.get("model_id", ""),
+        "mode": conversation.get("mode", "long"),
     }
     _insert_turn_result(conv_id, turn_data)
     _update_conversation_status(conv_id, "running")
@@ -1360,6 +1368,7 @@ async def list_conversations(
     max_score: float | None = Query(default=None),
     archived: bool | None = Query(default=None),
     include_archived: bool = Query(default=False),
+    mode: str = Query(default="long"),
 ):
     """获取对话列表"""
     return {
@@ -1373,6 +1382,7 @@ async def list_conversations(
                 max_score=max_score,
                 archived=archived,
                 include_archived=include_archived,
+                mode=mode,
             )
         )
     }

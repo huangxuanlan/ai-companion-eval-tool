@@ -88,25 +88,26 @@ def _build_builtin_config(preset_id: str) -> dict:
 
 
 @router.get("")
-async def list_presets():
+async def list_presets(mode: str = Query(default="long")):
     """获取所有预设角色（内置 + 用户自定义）"""
     # 内置预设
     builtins = []
-    for pid, preset in PRESET_CHARACTERS.items():
-        builtins.append({
-            "id": pid,
-            "name": preset["name"],
-            "nickname": preset["name"],
-            "type": preset["type"],
-            "personality_type": preset["type"],
-            "default_relationship": preset.get("default_relationship", "暧昧"),
-            "source": "builtin",
-            "gender": preset.get("gender", ""),
-            "is_builtin": True,
-        })
+    if mode == "long":
+        for pid, preset in PRESET_CHARACTERS.items():
+            builtins.append({
+                "id": pid,
+                "name": preset["name"],
+                "nickname": preset["name"],
+                "type": preset["type"],
+                "personality_type": preset["type"],
+                "default_relationship": preset.get("default_relationship", "暧昧"),
+                "source": "builtin",
+                "gender": preset.get("gender", ""),
+                "is_builtin": True,
+            })
 
     # 数据库自定义预设
-    custom = db.list_presets()
+    custom = db.list_presets(mode=mode)
     for c in custom:
         c["source"] = "custom"
         c["is_builtin"] = False
@@ -161,14 +162,14 @@ async def get_preset(preset_id: str):
 @router.post("")
 async def create_preset(data: PresetCreate):
     """创建自定义预设"""
-    preset_id = db.create_preset(data.name, data.type, data.config)
+    preset_id = db.create_preset(data.name, data.type, data.config, mode=data.mode or "long")
     return {"id": preset_id, "message": "预设已创建"}
 
 
 @router.post("/save")
 async def save_as_preset(data: PresetCreate):
     """保存当前配置为角色模板（v5.0 Phase 1）"""
-    preset_id = db.create_preset(data.name, data.type, data.config)
+    preset_id = db.create_preset(data.name, data.type, data.config, mode=data.mode or "long")
     return {
         "id": preset_id,
         "message": f"已保存为角色模板: {data.name}",

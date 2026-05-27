@@ -437,7 +437,7 @@ async def save_config(data: ConfigSaveRequest):
             "ephemeral": True,
             "config": config,
         }
-    config_id = db.create_saved_config(name, config, type_)
+    config_id = db.create_saved_config(name, config, type_, mode=data.mode or "long")
     return {
         "id": config_id,
         "name": name,
@@ -447,12 +447,12 @@ async def save_config(data: ConfigSaveRequest):
 
 
 @router.get("")
-async def list_configs():
+async def list_configs(mode: str = Query(default="long")):
     """列出当前可复用的配置快照。"""
     items = []
 
     if not is_public_demo_mode():
-        for saved in db.list_saved_configs():
+        for saved in db.list_saved_configs(mode=mode):
             config = saved.get("config", {})
             items.append(
                 {
@@ -467,21 +467,22 @@ async def list_configs():
                 }
             )
 
-    for preset_id, preset in PRESET_CHARACTERS.items():
-        items.append(
-            {
-                "id": preset_id,
-                "source": "builtin_preset",
-                "name": preset.get("name", preset_id),
-                "type": preset.get("type", ""),
-                "relationship": preset.get("default_relationship", "暧昧"),
-                "prompt_file": preset.get("prompt_file", ""),
-                "turns_count": 0,
-            }
-        )
+    if mode == "long":
+        for preset_id, preset in PRESET_CHARACTERS.items():
+            items.append(
+                {
+                    "id": preset_id,
+                    "source": "builtin_preset",
+                    "name": preset.get("name", preset_id),
+                    "type": preset.get("type", ""),
+                    "relationship": preset.get("default_relationship", "暧昧"),
+                    "prompt_file": preset.get("prompt_file", ""),
+                    "turns_count": 0,
+                }
+            )
 
     if not is_public_demo_mode():
-        for preset in db.list_presets():
+        for preset in db.list_presets(mode=mode):
             items.append(
                 {
                     "id": preset["id"],
@@ -495,7 +496,7 @@ async def list_configs():
                 }
             )
 
-        for conversation in db.list_conversations():
+        for conversation in db.list_conversations(mode=mode):
             items.append(
                 {
                     "id": conversation["id"],

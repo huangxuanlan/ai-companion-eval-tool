@@ -805,6 +805,7 @@ def test_save_config_copies_few_shot_file_from_modules(
 def test_interactive_generate_route_returns_real_message_snapshot(
     prompt_sources,
     isolated_db,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     calls = []
 
@@ -872,7 +873,7 @@ def test_interactive_generate_route_returns_real_message_snapshot(
         assert create_response.status_code == 200, create_response.text
         conv_id = create_response.json()["id"]
 
-        conversations_router._conv_service = FakeConvService()
+        monkeypatch.setattr(conversations_router, "_conv_service", FakeConvService())
         generate_response = client.post(
             f"/api/conversations/{conv_id}/generate",
             json={
@@ -908,6 +909,7 @@ def test_interactive_generate_route_returns_real_message_snapshot(
 def test_interactive_regenerate_route_replaces_last_turn(
     prompt_sources,
     isolated_db,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     calls = []
 
@@ -998,7 +1000,7 @@ def test_interactive_regenerate_route_replaces_last_turn(
             },
         )
 
-        conversations_router._conv_service = FakeConvService()
+        monkeypatch.setattr(conversations_router, "_conv_service", FakeConvService())
         regenerate_response = client.post(
             f"/api/conversations/{conv_id}/turns/1/regenerate",
             json={

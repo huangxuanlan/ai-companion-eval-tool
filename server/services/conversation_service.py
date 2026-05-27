@@ -110,6 +110,7 @@ class ConversationService:
         preset_id: str | None = None,
         model_mini: str | None = None,
         prompt_version: str = "",
+        mode: str = "long",
     ) -> str:
         return self.store.create_conversation(
             model_id=model_id,
@@ -117,6 +118,7 @@ class ConversationService:
             preset_id=preset_id,
             model_mini=model_mini,
             prompt_version=prompt_version,
+            mode=mode,
         )
 
     def get_conversation(self, conv_id: str) -> dict | None:
@@ -347,10 +349,11 @@ class ConversationService:
         for item in results or []:
             user_input = str(item.get("user_input", "")).strip()
             ai_output = str(item.get("ai_output", "")).strip()
+            mode = item.get("mode", "")
             if user_input:
-                history.append({"role": "user", "content": user_input})
+                history.append({"role": "user", "content": user_input, "source_mode": mode})
             if ai_output:
-                history.append({"role": "assistant", "content": ai_output})
+                history.append({"role": "assistant", "content": ai_output, "source_mode": mode})
         return history
 
     @staticmethod
@@ -764,6 +767,7 @@ class ConversationService:
             top_p=top_p,
             switch_state=active_switch_state,
         )
+        turn_data["mode"] = conversation.get("mode", "long")
         self.insert_turn_result(conv_id, turn_data)
         if active_switch_state:
             runtime["switch_state"] = ""
@@ -771,11 +775,7 @@ class ConversationService:
             runtime["switch_state_consumed_turn"] = turn_num
             self.update_conversation_config(conv_id, config)
         updated_results = [*results, turn_data]
-        updated_history = [
-            *conversation_history,
-            {"role": "user", "content": user_input},
-            {"role": "assistant", "content": turn_data["ai_output"]},
-        ]
+        updated_history = self._build_history_from_results(updated_results)
         self._schedule_summary_job_if_needed(
             conv_id=conv_id,
             config=config,
@@ -985,6 +985,7 @@ class ConversationService:
             ai_output = turn_data["ai_output"]
 
             # 保存到数据库
+            turn_data["mode"] = conversation.get("mode", "long")
             self.insert_turn_result(conv_id, turn_data)
             results.append(turn_data)
 
@@ -993,8 +994,7 @@ class ConversationService:
                 await on_turn_complete(turn_data)
 
             # 更新历史
-            conversation_history.append({"role": "user", "content": user_input})
-            conversation_history.append({"role": "assistant", "content": ai_output})
+            conversation_history = self._build_history_from_results(results)
 
             self._schedule_summary_job_if_needed(
                 conv_id=conv_id,

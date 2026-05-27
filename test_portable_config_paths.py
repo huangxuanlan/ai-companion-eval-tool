@@ -30,13 +30,14 @@ def test_config_supports_bundle_relative_paths(monkeypatch, tmp_path: Path):
     (bundle_dir / "promptfoo-pipeline" / "scoring_prompts" / "长文模式").mkdir(parents=True)
     (bundle_dir / "promptfoo-pipeline" / "scripts").mkdir(parents=True)
 
+    import os
+    # Clean up all existing LONGFORM_ env variables to isolate config resolution test
+    for key in list(os.environ.keys()):
+        if key.startswith("LONGFORM_"):
+            monkeypatch.delenv(key, raising=False)
+
     monkeypatch.setenv("LONGFORM_BUNDLE_DIR", str(bundle_dir))
     monkeypatch.setenv("LONGFORM_TOOLCHAIN_ROOT", str(bundle_dir))
-    monkeypatch.delenv("LONGFORM_CONTENT_ROOT", raising=False)
-    monkeypatch.delenv("LONGFORM_PROMPT_DIR", raising=False)
-    monkeypatch.delenv("LONGFORM_PROVIDER_LLM_DIR", raising=False)
-    monkeypatch.delenv("LONGFORM_SCORING_PIPELINE_DIR", raising=False)
-    monkeypatch.delenv("LONGFORM_PIPELINE_SCRIPTS_DIR", raising=False)
 
     module = _reload_config()
 

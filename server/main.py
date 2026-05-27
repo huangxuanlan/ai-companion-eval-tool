@@ -15,6 +15,7 @@ SERVER_DIR = Path(__file__).resolve().parent
 if __package__:
     from . import config as _config
     sys.modules.setdefault("config", _config)
+    from .config import AUTO_CLEANUP_DAYS, PUBLIC_DEMO_MODE
 
     from . import database as _database
     sys.modules.setdefault("database", _database)
@@ -29,7 +30,6 @@ if __package__:
     sys.modules.setdefault("services", _services)
 
     database = _database
-    from .config import AUTO_CLEANUP_DAYS, PUBLIC_DEMO_MODE
     from .routers import (
         ab_sessions,
         chat,
@@ -43,6 +43,7 @@ if __package__:
         prompts,
         scoring,
         scoring_prompts,
+        bridge,
     )
     from .services.public_demo import (
         build_public_demo_app_config,
@@ -64,6 +65,7 @@ else:
         prompts,
         scoring,
         scoring_prompts,
+        bridge,
     )
     from services.public_demo import (
         build_public_demo_app_config,
@@ -83,6 +85,8 @@ async def lifespan(app):
     database.migrate_add_conversation_events_table()
     database.migrate_add_orchestration_runs_table()
     database.migrate_add_ab_sessions_table()
+    database.migrate_add_mode_columns()
+    database.migrate_add_mode_switches_table()
     cleanup_result = database.cleanup_archived_conversations(AUTO_CLEANUP_DAYS)
     await conversations.reconcile_conversation_runtime_state()
     await orchestrations.orchestration_service.reconcile_runtime_state()
@@ -126,6 +130,7 @@ app.include_router(prompts.router)
 app.include_router(chat.router)
 app.include_router(compare.router)
 app.include_router(configs.router)
+app.include_router(bridge.router)
 
 STATIC_DIR = SERVER_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)

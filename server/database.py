@@ -276,7 +276,8 @@ def init_db():
             name TEXT NOT NULL,
             type TEXT NOT NULL,
             config_json TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE TABLE IF NOT EXISTS saved_configs (
@@ -284,7 +285,8 @@ def init_db():
             name TEXT NOT NULL,
             type TEXT NOT NULL,
             config_json TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE TABLE IF NOT EXISTS conversations (
@@ -299,6 +301,7 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             pinned INTEGER DEFAULT 0,
             archived_at TIMESTAMP,
+            mode TEXT DEFAULT 'long',
             FOREIGN KEY (preset_id) REFERENCES presets(id)
         );
 
@@ -332,6 +335,7 @@ def init_db():
             score_total REAL DEFAULT 0,
             score_reasoning TEXT DEFAULT '',
             score_status TEXT DEFAULT 'unscored',
+            mode TEXT DEFAULT 'long',
             FOREIGN KEY (conversation_id) REFERENCES conversations(id)
                 ON DELETE CASCADE
         );
@@ -373,12 +377,12 @@ def _touch_conversation(conn: sqlite3.Connection, conv_id: str):
 
 # ── Preset CRUD ───────────────────────────────────────────────
 
-def create_preset(name: str, type_: str, config: dict) -> str:
+def create_preset(name: str, type_: str, config: dict, mode: str = "long") -> str:
     preset_id = str(uuid.uuid4())[:8]
     conn = get_connection()
     conn.execute(
-        "INSERT INTO presets (id, name, type, config_json) VALUES (?, ?, ?, ?)",
-        (preset_id, name, type_, json.dumps(config, ensure_ascii=False)),
+        "INSERT INTO presets (id, name, type, config_json, mode) VALUES (?, ?, ?, ?, ?)",
+        (preset_id, name, type_, json.dumps(config, ensure_ascii=False), mode),
     )
     conn.commit()
     conn.close()
@@ -394,13 +398,16 @@ def get_preset(preset_id: str) -> dict | None:
     return {**dict(row), "config": json.loads(row["config_json"])}
 
 
-def list_presets() -> list:
+def list_presets(mode: str = "") -> list:
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, name, type, created_at FROM presets ORDER BY created_at"
+        "SELECT id, name, type, created_at, COALESCE(mode, 'long') as mode FROM presets ORDER BY created_at"
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    res = [dict(r) for r in rows]
+    if mode:
+        res = [r for r in res if r["mode"] == mode]
+    return res
 
 
 def delete_preset(preset_id: str) -> bool:
@@ -416,13 +423,13 @@ def delete_preset(preset_id: str) -> bool:
     return cur.rowcount > 0
 
 
-def create_saved_config(name: str, config: dict, type_: str = "custom_config") -> str:
+def create_saved_config(name: str, config: dict, type_: str = "custom_config", mode: str = "long") -> str:
     config_id = f"cfg_{uuid.uuid4().hex[:8]}"
     conn = get_connection()
     conn.execute(
-        """INSERT INTO saved_configs (id, name, type, config_json)
-           VALUES (?, ?, ?, ?)""",
-        (config_id, name, type_, json.dumps(config, ensure_ascii=False)),
+        """INSERT INTO saved_configs (id, name, type, config_json, mode)
+           VALUES (?, ?, ?, ?, ?)""",
+        (config_id, name, type_, json.dumps(config, ensure_ascii=False), mode),
     )
     conn.commit()
     conn.close()
@@ -441,16 +448,18 @@ def get_saved_config(config_id: str) -> dict | None:
     return {**dict(row), "config": json.loads(row["config_json"])}
 
 
-def list_saved_configs() -> list:
+def list_saved_configs(mode: str = "") -> list:
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, name, type, created_at, config_json FROM saved_configs ORDER BY created_at DESC"
+        "SELECT id, name, type, created_at, config_json, COALESCE(mode, 'long') as mode FROM saved_configs ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
     result = []
     for row in rows:
         item = dict(row)
         item["config"] = json.loads(item.pop("config_json", "{}"))
+        if mode and item["mode"] != mode:
+            continue
         result.append(item)
     return result
 
@@ -463,15 +472,16 @@ def create_conversation(
     preset_id: str | None = None,
     model_mini: str | None = None,
     prompt_version: str = "",
+    mode: str = "long",
 ) -> str:
     conv_id = str(uuid.uuid4())[:8]
     conn = get_connection()
     conn.execute(
         """INSERT INTO conversations
-           (id, preset_id, model_id, model_mini, prompt_version, config_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+           (id, preset_id, model_id, model_mini, prompt_version, config_json, status, mode)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
         (conv_id, preset_id, model_id, model_mini or "",
-         prompt_version, json.dumps(config, ensure_ascii=False)),
+         prompt_version, json.dumps(config, ensure_ascii=False), mode),
     )
     conn.commit()
     conn.close()
@@ -585,6 +595,7 @@ def list_conversations(
     max_score=None,
     archived: bool | None = None,
     include_archived: bool = False,
+    mode: str = "",
 ) -> list:
     conn = get_connection()
     has_ai_report_summaries = _table_exists(conn, "ai_report_summaries")
@@ -643,6 +654,7 @@ def list_conversations(
                   COALESCE(c.pinned, 0) as pinned,
                   c.archived_at,
                   c.config_json,
+                  COALESCE(c.mode, 'long') as mode,
                   (SELECT COUNT(*) FROM turn_results t WHERE t.conversation_id = c.id) as total_turns,
                   (SELECT COALESCE(NULLIF(TRIM(t.ai_output), ''), NULLIF(TRIM(t.user_input), ''), '')
                    FROM turn_results t
@@ -718,6 +730,8 @@ def list_conversations(
         d["pinned"] = bool(d.get("pinned"))
         created_date = str(d.get("created_at") or "")[:10]
         current_score = _normalize_float(d.get("score_avg"))
+        if mode and str(d.get("mode", "long")).strip().lower() != str(mode).strip().lower():
+            continue
         if d["archived"] and not include_archived:
             continue
         if archived is True and not d["archived"]:
@@ -791,8 +805,8 @@ def insert_turn_result(conv_id: str, data: dict) -> int:
             dialogue_summary, msg_count, input_tokens, output_tokens,
             latency_s, has_deep_injection, has_style_isolation,
             has_cooldown_reinject, token_trim_level, quality_retries,
-            messages_snapshot, request_payload_snapshot, model_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            messages_snapshot, request_payload_snapshot, model_id, mode)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             conv_id, data["turn"], data.get("user_input", ""),
             data.get("ai_output", ""), data.get("word_count", 0),
@@ -807,6 +821,7 @@ def insert_turn_result(conv_id: str, data: dict) -> int:
             json.dumps(data.get("messages_snapshot", []), ensure_ascii=False),
             json.dumps(data.get("request_payload_snapshot", {}), ensure_ascii=False),
             data.get("model_id", ""),
+            data.get("mode", "long"),
         ),
     )
     _touch_conversation(conn, conv_id)
@@ -1064,7 +1079,8 @@ def migrate_add_compare_reports_table():
             groups_json TEXT NOT NULL,
             group_results_json TEXT NOT NULL,
             winners_json TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
     """)
     conn.close()
@@ -1083,7 +1099,8 @@ def migrate_add_ai_report_summaries_table():
             prompt_filename TEXT NOT NULL,
             source_signature TEXT NOT NULL,
             markdown TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_report_summaries_unique
@@ -1109,7 +1126,8 @@ def migrate_add_conversation_events_table():
             level TEXT NOT NULL DEFAULT 'info',
             event_type TEXT NOT NULL,
             detail_json TEXT NOT NULL DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE INDEX IF NOT EXISTS idx_conversation_events_conv_created
@@ -1133,7 +1151,8 @@ def migrate_add_orchestration_runs_table():
             manifest_json TEXT NOT NULL DEFAULT '{}',
             state_json TEXT NOT NULL DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE INDEX IF NOT EXISTS idx_orchestration_runs_kind_updated
@@ -1156,7 +1175,8 @@ def migrate_add_ab_sessions_table():
             current_turn INTEGER NOT NULL DEFAULT 0,
             config_json TEXT NOT NULL DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT DEFAULT 'long'
         );
 
         CREATE INDEX IF NOT EXISTS idx_ab_sessions_status_updated
@@ -1166,6 +1186,32 @@ def migrate_add_ab_sessions_table():
             ON ab_sessions(datetime(created_at) DESC, id DESC);
     """)
     conn.close()
+
+
+def migrate_add_mode_columns():
+    """v6.0: 为 9 张表动态添加 mode 字段并创建索引"""
+    conn = get_connection()
+    tables = [
+        "presets",
+        "saved_configs",
+        "conversations",
+        "turn_results",
+        "compare_reports",
+        "ai_report_summaries",
+        "conversation_events",
+        "orchestration_runs",
+        "ab_sessions"
+    ]
+    for table in tables:
+        if _table_exists(conn, table):
+            _ensure_column(conn, table, "mode", "TEXT DEFAULT 'long'")
+
+    # 创建索引以提高按模式检索的效率
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_mode ON conversations(mode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_turn_results_mode ON turn_results(mode)")
+    conn.commit()
+    conn.close()
+
 
 
 def create_orchestration_run(
@@ -1681,4 +1727,221 @@ def cleanup_archived_conversations(days: int = 30) -> dict:
         "deleted_count": deleted_count,
         "conversation_ids": deleted_ids,
     }
+
+
+def migrate_add_mode_switches_table():
+    """v6.0: 创建桥接切换日志表"""
+    conn = get_connection()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS mode_switches (
+            switch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_mode TEXT NOT NULL,
+            to_mode TEXT NOT NULL,
+            source_conversation_id TEXT NOT NULL,
+            target_conversation_id TEXT,
+            target_model TEXT NOT NULL,
+            triggered_by TEXT NOT NULL DEFAULT 'user_click',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            switch_summary TEXT DEFAULT '',
+            summary_model TEXT DEFAULT 'deepseek-v4-flash',
+            summary_char_count INTEGER DEFAULT 0,
+            summary_token_count INTEGER DEFAULT 0,
+            summary_latency_ms INTEGER DEFAULT 0,
+            summary_delayed INTEGER DEFAULT 0,
+
+            bridge_turns_requested INTEGER DEFAULT 0,
+            bridge_effective_turns INTEGER DEFAULT 0,
+            bridge_payload_messages INTEGER DEFAULT 0,
+            hetero_assistant_wrapped INTEGER DEFAULT 0,
+            source_counts_json TEXT DEFAULT '{}',
+            bridge_total_available_messages INTEGER DEFAULT 0,
+
+            first_response_cjk_chars INTEGER DEFAULT 0,
+            first_response_paren_pairs INTEGER DEFAULT 0,
+            first_response_ngram_max_recent_pct REAL DEFAULT 0,
+            first_response_format_issues_json TEXT DEFAULT '[]',
+
+            verification_result TEXT DEFAULT 'pending',
+            summary_interval INTEGER DEFAULT 10,
+            FOREIGN KEY (source_conversation_id) REFERENCES conversations(id),
+            FOREIGN KEY (target_conversation_id) REFERENCES conversations(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mode_switches_from_to ON mode_switches(from_mode, to_mode);
+        CREATE INDEX IF NOT EXISTS idx_mode_switches_source ON mode_switches(source_conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_mode_switches_created ON mode_switches(created_at);
+    """)
+    try:
+        conn.execute("ALTER TABLE mode_switches ADD COLUMN summary_interval INTEGER DEFAULT 10")
+        conn.commit()
+    except Exception:
+        pass
+    conn.close()
+
+
+def create_mode_switch(
+    from_mode: str,
+    to_mode: str,
+    source_conversation_id: str,
+    target_model: str,
+    triggered_by: str = 'user_click',
+    summary_interval: int = 10,
+    bridge_turns_requested: int = 20
+) -> int:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO mode_switches (
+            from_mode, to_mode, source_conversation_id, target_model, triggered_by, summary_interval, bridge_turns_requested
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (from_mode, to_mode, source_conversation_id, target_model, triggered_by, summary_interval, bridge_turns_requested)
+    )
+    switch_id = int(cur.lastrowid or 0)
+    conn.commit()
+    conn.close()
+    return switch_id
+
+
+def get_mode_switch(switch_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM mode_switches WHERE switch_id=?", (switch_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return dict(row)
+
+
+def update_mode_switch_summary(
+    switch_id: int,
+    summary: str,
+    summary_model: str,
+    char_count: int,
+    token_count: int,
+    latency_ms: int,
+    delayed: bool
+):
+    conn = get_connection()
+    conn.execute(
+        """UPDATE mode_switches SET
+            switch_summary=?,
+            summary_model=?,
+            summary_char_count=?,
+            summary_token_count=?,
+            summary_latency_ms=?,
+            summary_delayed=?
+           WHERE switch_id=?""",
+        (summary, summary_model, char_count, token_count, latency_ms, 1 if delayed else 0, switch_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_mode_switch_meta(
+    switch_id: int,
+    turns_requested: int,
+    effective_turns: int,
+    payload_messages: int,
+    hetero_assistant_wrapped: int,
+    source_counts: dict,
+    total_available_messages: int
+):
+    conn = get_connection()
+    conn.execute(
+        """UPDATE mode_switches SET
+            bridge_turns_requested=?,
+            bridge_effective_turns=?,
+            bridge_payload_messages=?,
+            hetero_assistant_wrapped=?,
+            source_counts_json=?,
+            bridge_total_available_messages=?
+           WHERE switch_id=?""",
+        (
+            turns_requested,
+            effective_turns,
+            payload_messages,
+            hetero_assistant_wrapped,
+            json.dumps(source_counts, ensure_ascii=False),
+            total_available_messages,
+            switch_id
+        )
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_mode_switch_first_response(
+    switch_id: int,
+    target_conversation_id: str | None,
+    cjk_chars: int,
+    paren_pairs: int,
+    ngram_max: float,
+    format_issues: list,
+    verification_result: str
+):
+    conn = get_connection()
+    conn.execute(
+        """UPDATE mode_switches SET
+            target_conversation_id=?,
+            first_response_cjk_chars=?,
+            first_response_paren_pairs=?,
+            first_response_ngram_max_recent_pct=?,
+            first_response_format_issues_json=?,
+            verification_result=?
+           WHERE switch_id=?""",
+        (
+            target_conversation_id,
+            cjk_chars,
+            paren_pairs,
+            ngram_max,
+            json.dumps(format_issues, ensure_ascii=False),
+            verification_result,
+            switch_id
+        )
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_mode_switches(
+    from_mode: str | None = None,
+    to_mode: str | None = None,
+    limit: int = 50,
+    offset: int = 0
+) -> list[dict]:
+    conn = get_connection()
+    query = "SELECT * FROM mode_switches"
+    params = []
+    where_clauses = []
+    if from_mode:
+        where_clauses.append("from_mode=?")
+        params.append(from_mode)
+    if to_mode:
+        where_clauses.append("to_mode=?")
+        params.append(to_mode)
+    
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+    
+    query += " ORDER BY switch_id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_conversation_mode(conv_id: str, mode: str):
+    """更新会话模式 (short/long)"""
+    conn = get_connection()
+    conn.execute("UPDATE conversations SET mode=? WHERE id=?", (mode, conv_id))
+    conn.commit()
+    conn.close()
+
+
+def update_turn_mode(conv_id: str, turn: int, mode: str):
+    """更新某一轮接话的模式 (short/long)"""
+    conn = get_connection()
+    conn.execute("UPDATE turn_results SET mode=? WHERE conversation_id=? AND turn=?", (mode, conv_id, turn))
+    conn.commit()
+    conn.close()
 

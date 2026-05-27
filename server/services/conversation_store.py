@@ -18,6 +18,7 @@ class ConversationStore:
         preset_id: str | None = None,
         model_mini: str | None = None,
         prompt_version: str = "",
+        mode: str = "long",
     ) -> str:
         return db.create_conversation(
             model_id=model_id,
@@ -25,6 +26,7 @@ class ConversationStore:
             preset_id=preset_id,
             model_mini=model_mini,
             prompt_version=prompt_version,
+            mode=mode,
         )
 
     def get_conversation(self, conv_id: str) -> dict | None:

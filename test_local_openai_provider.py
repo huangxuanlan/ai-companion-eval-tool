@@ -26,7 +26,7 @@ def test_default_primary_model_switches_to_local_gemma():
     models = {item["id"]: item for item in ModelAdapter().list_models()}
     builtin = ModelAdapter.BUILTIN_MODELS["gemma4-31b-local"]
 
-    assert DEFAULT_PRIMARY_MODEL == "gemma4-31b-local"
+    assert DEFAULT_PRIMARY_MODEL == "deepseek-v4-pro"
     assert "gemma4-31b-local" in models
     assert models["gemma4-31b-local"]["provider"] == "local_openai"
     assert models["gemma4-31b-local"]["capabilities"]["thinking"] is True

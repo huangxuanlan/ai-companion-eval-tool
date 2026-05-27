@@ -169,15 +169,23 @@ DB_PATH = Path(os.environ.get("LONGFORM_DB_PATH", str(SERVER_DIR / "longform.db"
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOP_P = 0.95
-DEFAULT_PRIMARY_MODEL = "gemma4-31b-local"
+DEFAULT_PRIMARY_MODEL = "deepseek-v4-pro"
+DEFAULT_PRIMARY_MODEL_SHORTFORM = "deepseek-v4-flash"
 DEFAULT_SUMMARY_MODEL = "doubao-lite"
-# 打分默认切到 DashScope 系列，便于统一开启 thinking_budget
-DEFAULT_SCORING_MODEL = os.environ.get("DEFAULT_SCORING_MODEL", "qwen3.6-plus")
+DEFAULT_SCORING_MODEL = os.environ.get("DEFAULT_SCORING_MODEL", "qwen3.7-max")
 DEFAULT_PROFILE_MODEL = "doubao-lite"
 DEFAULT_AI_SUMMARY_MODEL = "qwen-plus"
 DEFAULT_SUMMARY_INTERVAL = 5
 DEFAULT_INJECTION_DEPTH = 4
 DEFAULT_AUTO_CLEANUP_DAYS = 30
+
+SHORTFORM_PROMPT_DIR = _resolve_dir(
+    "SHORTFORM_PROMPT_DIR",
+    [
+        WORKSPACE_ROOT / "工作资料" / "产品资料" / "提示词资料" / "日常模式" / "提示词",
+    ],
+    fallback=r"E:\工作资料\产品资料\提示词资料\日常模式\提示词",
+)
 # 默认后端并发上限（可用 LONGFORM_MAX_CONCURRENT_CONVERSATIONS 覆盖）
 DEFAULT_MAX_CONCURRENT_CONVERSATIONS = 24
 # 模型对比/A·B测试最多并行模型数（可用 LONGFORM_MAX_COMPARE_MODELS 覆盖）
