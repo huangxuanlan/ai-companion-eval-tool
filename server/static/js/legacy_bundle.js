@@ -1725,6 +1725,8 @@ function normalizeDebugEntry(source = {}, fallback = {}) {
     total_tokens: source.total_tokens ?? fallback.total_tokens ?? 0,
     has_deep_injection: source.has_deep_injection ?? fallback.has_deep_injection ?? false,
     quality_retries: source.quality_retries ?? fallback.quality_retries ?? 0,
+    has_cooldown_reinject: source.has_cooldown_reinject ?? fallback.has_cooldown_reinject ?? false,
+    has_style_isolation: source.has_style_isolation ?? fallback.has_style_isolation ?? false,
     model: source.model || requestPayload.model_id || fallback.model || '',
   };
 }
@@ -4198,6 +4200,7 @@ function renderTurnBubbles(turn, turnIdx) {
     const ab = document.createElement('div'); ab.className = 'chat-bubble ai';
     const turnNumber = turn.turn || turn.turn_order || turnIdx;
     ab.dataset.turn = String(turnNumber);
+    ab.id = 'turn-bubble-' + turnNumber;
     const hasManualScore = turn.manual_star_score !== undefined
       && turn.manual_star_score !== null
       && turn.manual_star_score !== '';
@@ -4207,7 +4210,14 @@ function renderTurnBubbles(turn, turnIdx) {
     const wcClass = wordCount >= 300 && wordCount <= 500 ? 'word-count-ok' : 'word-count-warn';
     const inTok = turn.input_tokens || 0, outTok = turn.output_tokens || turn.token_count || 0;
     const lat = ((turn.latency_s || (turn.latency ? turn.latency / 1000 : 0)) || 0).toFixed(1);
-    const metaHtml = `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">字数:<span class="${wcClass}">${wordCount}</span> · tokens:${inTok}→${outTok} · 延迟:${lat}s</div>`;
+    const trimLvMeta = Number(turn.token_trim_level || (turn.debug_info || {}).trim_level || 0);
+    const retriesMeta = Number(turn.quality_retries || (turn.debug_info || {}).quality_retries || 0);
+    const reinjectMeta = !!(turn.has_cooldown_reinject || (turn.debug_info || {}).has_cooldown_reinject);
+    let metaExtra = '';
+    if (trimLvMeta > 0) metaExtra += ` · <span style="font-family:var(--font-mono,'monospace')">裁剪:L${trimLvMeta}</span>`;
+    if (retriesMeta > 0) metaExtra += ` · <span style="font-family:var(--font-mono,'monospace')">重试:${retriesMeta}次</span>`;
+    if (reinjectMeta) metaExtra += ` · <span style="font-family:var(--font-mono,'monospace')">复注:✓</span>`;
+    const metaHtml = `<div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">字数:<span class="${wcClass}">${wordCount}</span> · tokens:${inTok}→${outTok} · 延迟:${lat}s${metaExtra}</div>`;
 
     const tags = buildTurnStatusTags(turn);
     let tagsHtml = '';
@@ -4321,12 +4331,17 @@ function buildTurnStatusTags(turn) {
   const tags = [];
   const debugInfo = turn.debug_info || {};
   if (turn.summary_generated || debugInfo.summary_generated) tags.push({ text: '🟡 摘要已生成', cls: 'yellow' });
-  const trimLv = turn.token_trim_level !== undefined ? turn.token_trim_level : debugInfo.trim_level;
-  if (trimLv > 0) tags.push({ text: `🟠 Token截断 L${trimLv}`, cls: 'orange' });
+  const trimLv = turn.token_trim_level !== undefined ? Number(turn.token_trim_level) : Number(debugInfo.trim_level || 0);
+  if (trimLv > 0) {
+    if (trimLv <= 2) tags.push({ text: `🟡 裁剪 L${trimLv}（低影响）`, cls: 'yellow' });
+    else if (trimLv <= 4) tags.push({ text: `🟠 裁剪 L${trimLv}（中影响）`, cls: 'orange' });
+    else tags.push({ text: `🔴 裁剪 L${trimLv}（高影响）`, cls: 'red' });
+  }
   if (turn.has_deep_injection || debugInfo.has_deep_injection) tags.push({ text: '🔵 深度注入', cls: 'blue' });
-  const retries = turn.quality_retries !== undefined ? turn.quality_retries : debugInfo.quality_retries;
+  const retries = turn.quality_retries !== undefined ? Number(turn.quality_retries) : Number(debugInfo.quality_retries || 0);
   if (retries > 0) tags.push({ text: `🔴 质量重试 (${retries})`, cls: 'red' });
-  if (turn.has_cooldown_reinject || debugInfo.has_cooldown_reinject) tags.push({ text: '🟣 冷却复注', cls: 'purple' });
+  const hasCooldown = !!(Number(turn.has_cooldown_reinject) || turn.has_cooldown_reinject === true || Number(debugInfo.has_cooldown_reinject) || debugInfo.has_cooldown_reinject === true);
+  if (hasCooldown) tags.push({ text: '🟣 冷却复注', cls: 'purple' });
   if (turn.has_style_isolation || debugInfo.has_style_isolation) tags.push({ text: '🔷 风格隔离', cls: 'lightblue' });
   if (turn.score_status === 'scored') tags.push({ text: '🟢 AI已评分', cls: 'green' });
   if (turn.manual_star_score !== undefined && turn.manual_star_score !== null && turn.manual_star_score !== '') tags.push({ text: '🟢 人工已评分', cls: 'green' });
@@ -4484,21 +4499,21 @@ function renderScoreEvidenceChain(evidence = {}, { interactive = true } = {}) {
   return `<div class="score-evidence-chain">
     <div class="score-evidence-title">证据链</div>
     ${usefulRows.map(item => {
-      const weakest = Array.isArray(item.weakest_dimensions) ? item.weakest_dimensions : [];
-      const weakestHtml = weakest.length
-        ? weakest.map(row => `<span class="score-evidence-chip">${escapeHtml(getDimensionLabel(row.dimension))} ${toFixedScore(row.score, 0)}</span>`).join('')
-        : '<span class="score-evidence-muted">暂无低维度证据</span>';
-      const failureHtml = item.failure_type
-        ? `<span class="score-evidence-chip is-danger">${escapeHtml(getFailureTypeLabel(item.failure_type))}</span>`
-        : '';
-      const tag = interactive ? 'button' : 'div';
-      const attrs = interactive ? ` type="button" data-turn="${escapeHtml(item.turn || '')}"` : '';
-      return `<${tag} class="score-evidence-item"${attrs}>
+    const weakest = Array.isArray(item.weakest_dimensions) ? item.weakest_dimensions : [];
+    const weakestHtml = weakest.length
+      ? weakest.map(row => `<span class="score-evidence-chip">${escapeHtml(getDimensionLabel(row.dimension))} ${toFixedScore(row.score, 0)}</span>`).join('')
+      : '<span class="score-evidence-muted">暂无低维度证据</span>';
+    const failureHtml = item.failure_type
+      ? `<span class="score-evidence-chip is-danger">${escapeHtml(getFailureTypeLabel(item.failure_type))}</span>`
+      : '';
+    const tag = interactive ? 'button' : 'div';
+    const attrs = interactive ? ` type="button" data-turn="${escapeHtml(item.turn || '')}"` : '';
+    return `<${tag} class="score-evidence-item"${attrs}>
         <div class="score-evidence-meta">Turn ${escapeHtml(item.turn || '-')} · ${escapeHtml(item.status || 'unknown')} ${failureHtml}</div>
         <div class="score-evidence-chips">${weakestHtml}</div>
         ${item.reasoning_excerpt ? `<div class="score-evidence-excerpt">${escapeHtml(item.reasoning_excerpt)}</div>` : ''}
       </${tag}>`;
-    }).join('')}
+  }).join('')}
   </div>`;
 }
 
@@ -4953,6 +4968,8 @@ function renderDebugView(turnIdx) {
   if (d.model) badges.innerHTML += `<span class="badge badge-success">${escapeHtml(d.model)}</span>`;
   if (d.has_deep_injection) badges.innerHTML += `<span class="badge badge-info">深度注入</span>`;
   if (d.quality_retries) badges.innerHTML += `<span class="badge badge-danger">质量重试 ${d.quality_retries}</span>`;
+  if (d.has_cooldown_reinject) badges.innerHTML += `<span class="badge badge-info" style="background:#7c3aed;color:#fff">冷却复注</span>`;
+  if (d.has_style_isolation) badges.innerHTML += `<span class="badge badge-info">风格隔离</span>`;
 
   const trimSegs = $('debug-trim-segments');
   trimSegs.innerHTML = '';
@@ -6089,6 +6106,75 @@ async function ensureConversationScored(convId, { skipTrigger = false, preferLat
   throw new Error(`对话 ${convId} 评分超时`);
 }
 
+/* ═══ 退化样本诊断 + 一键下钻 ═══ */
+function viewConversationAndScroll(convId, turnNumber) {
+  viewConversation(convId);
+  setTimeout(() => {
+    const el = document.getElementById('turn-bubble-' + turnNumber);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.transition = 'background-color 0.3s ease';
+      el.style.backgroundColor = 'rgba(245,158,11,0.15)';
+      setTimeout(() => { el.style.backgroundColor = ''; }, 600);
+      setTimeout(() => { el.style.backgroundColor = 'rgba(245,158,11,0.15)'; }, 900);
+      setTimeout(() => { el.style.backgroundColor = ''; }, 1500);
+    }
+  }, 800);
+}
+
+function buildDegenerationPanel(report) {
+  const groups = report.per_turn_comparison || [];
+  if (groups.length === 0) return '';
+  const dimKeys = ['persona_fidelity', 'narrative_immersion', 'emotional_tension', 'boundary_memory', 'format_compliance', 'context_coherence'];
+  const dimNames = { persona_fidelity: '人设一致性', narrative_immersion: '叙事沉浸度', emotional_tension: '情感张力', boundary_memory: '关系边界与记忆', format_compliance: '格式合规', context_coherence: '上下文衔接度' };
+  const degradations = {};
+  dimKeys.forEach(k => { degradations[k] = []; });
+  degradations['word_count'] = [];
+  groups.forEach(row => {
+    const turnGroups = row.groups || [];
+    if (turnGroups.length < 2) return;
+    const base = turnGroups[0];
+    if (base.status !== 'scored') return;
+    const baseDims = base.dimension_scores || {};
+    const baseOutput = base.ai_output || '';
+    for (let i = 1; i < turnGroups.length; i++) {
+      const cmp = turnGroups[i];
+      if (cmp.status !== 'scored') continue;
+      const cmpDims = cmp.dimension_scores || {};
+      const cmpOutput = cmp.ai_output || '';
+      dimKeys.forEach(dk => {
+        const bScore = Number(baseDims[dk] || 0);
+        const cScore = Number(cmpDims[dk] || 0);
+        if (bScore - cScore >= 1.0) {
+          degradations[dk].push({ turn: row.turn, baseScore: bScore, compareScore: cScore, delta: (bScore - cScore).toFixed(1), label: base.label, cmpLabel: cmp.label, convId: cmp.conv_id || '', reasoning: cmp.reasoning || '' });
+        }
+      });
+      const bLen = baseOutput.length;
+      const cLen = cmpOutput.length;
+      if (bLen > 0 && (cLen < bLen * 0.65 || (bLen >= 300 && cLen < 200))) {
+        degradations['word_count'].push({ turn: row.turn, baseScore: bLen, compareScore: cLen, delta: (bLen - cLen), label: base.label, cmpLabel: cmp.label, convId: cmp.conv_id || '', reasoning: `字数从 ${bLen} 降至 ${cLen}` });
+      }
+    }
+  });
+  const allKeys = [...dimKeys, 'word_count'];
+  const allNames = { ...dimNames, word_count: '字数退化' };
+  const totalDeg = allKeys.reduce((s, k) => s + degradations[k].length, 0);
+  if (totalDeg === 0) return '';
+  const badges = allKeys.map(k => {
+    const count = degradations[k].length;
+    const colorVar = count > 0 ? 'var(--color-danger, #DC2626)' : 'var(--color-success, #047857)';
+    const bgVar = count > 0 ? 'rgba(220,38,38,0.08)' : 'rgba(4,120,87,0.06)';
+    return `<span onclick="(function(){var el=document.getElementById('deg-list-${k}');if(el)el.style.display=el.style.display==='none'?'block':'none'})()" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;background:${bgVar};color:${colorVar};border:1px solid ${colorVar}">${allNames[k]} <strong>${count}</strong></span>`;
+  }).join('');
+
+  const lists = allKeys.map(k => {
+    if (!degradations[k].length) return '';
+    const rows = degradations[k].map(d => `<div style="padding:8px 12px;border:1px solid var(--border-light);border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px"><div>Turn ${d.turn} · ${escapeHtml(d.label || 'Base')} <strong>${d.baseScore}</strong> vs ${escapeHtml(d.cmpLabel || 'Compare')} <strong>${d.compareScore}</strong> · Δ${d.delta}</div><div style="display:flex;gap:6px">${d.reasoning ? `<span style="color:var(--text-secondary);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(d.reasoning)}">${escapeHtml(d.reasoning.slice(0, 40))}…</span>` : ''}${d.convId ? `<button class="btn btn-secondary" style="padding:2px 8px;font-size:11px" onclick="viewConversationAndScroll('${escapeHtml(d.convId)}',${d.turn})">🔍 下钻</button>` : ''}</div></div>`).join('');
+    return `<div id="deg-list-${k}" style="display:none;margin-top:8px"><div style="display:grid;gap:6px">${rows}</div></div>`;
+  }).join('');
+  return `<div style="margin-bottom:16px;padding:14px;border:2px solid var(--color-danger, #DC2626)40;border-radius:12px;background:var(--color-danger, #DC2626)08"><div style="font-weight:600;margin-bottom:10px;color:var(--color-danger, #DC2626)">⚠️ 实验组退化样本诊断</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px">${badges}</div>${lists}</div>`;
+}
+
 function renderCompareReportView(report) {
   const panel = $('history-report-panel');
   const titleEl = $('history-report-title');
@@ -6174,7 +6260,9 @@ function renderCompareReportView(report) {
       ? '🤖 AI 摘要分析'
       : '🤖 AI 对比分析';
   }
+  const degPanel = buildDegenerationPanel(report);
   content.innerHTML = `
+    ${degPanel}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px">${groupCards}</div>
     <div style="font-weight:600;margin-bottom:10px">维度汇总</div>
     <div style="display:grid;gap:10px">${perDimRows}</div>
@@ -8852,9 +8940,9 @@ async function recoverActiveOrchestrationRuns() {
     console.warn('恢复 Prompt A/B 批量任务失败:', results[2].reason);
   }
   const recoveredModes = [
-    batchRun ? 'batch' : '',
-    compareRun ? 'compare' : '',
-    abRun ? 'prompt-ab' : '',
+    batchRun && !isTerminalOrchestrationStatus(batchRun.status) ? 'batch' : '',
+    compareRun && !isTerminalOrchestrationStatus(compareRun.status) ? 'compare' : '',
+    abRun && !isTerminalOrchestrationStatus(abRun.status) ? 'prompt-ab' : '',
   ].filter(Boolean);
   if (recoveredModes.length) {
     const persisted = readPersistedTestCenterNavigation();
@@ -8865,6 +8953,7 @@ async function recoverActiveOrchestrationRuns() {
       abMode: preferredMode === 'prompt-ab' ? 'batch' : null,
     });
   }
+
   const recoveredKinds = [
     batchRun ? '批量任务' : '',
     compareRun ? '模型对比' : '',
@@ -11475,6 +11564,16 @@ function summarizeABBatchRunActivity(run) {
   };
 }
 
+function formatEta(seconds) {
+  if (!seconds || seconds <= 0) return '';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `预计剩余 ${h}h${m}m`;
+  if (m > 0) return `预计剩余 ${m}m${s}s`;
+  return `预计剩余 ${s}s`;
+}
+
 function updateABBatchProgress(run) {
   const summary = run?.summary || {};
   const total = Number(summary.total_items || 0);
@@ -11485,6 +11584,17 @@ function updateABBatchProgress(run) {
   if (activity.scoring > 0) parts.push(`评分活跃 ${activity.scoring}`);
   if (activity.pendingScoring > 0) parts.push(`待打分 ${activity.pendingScoring}`);
   if (activity.queued > 0) parts.push(`排队中 ${activity.queued}`);
+
+  const totalPlanned = Number(summary.total_planned_turns || 0);
+  const totalCompleted = Number(summary.total_completed_turns || 0);
+  const etaSeconds = Number(summary.eta_seconds || 0);
+  if (totalPlanned > 0) {
+    parts.push(`轮次进度 ${totalCompleted}/${totalPlanned}`);
+  }
+  if (etaSeconds > 0 && ['running', 'queued', 'pending'].includes(run?.status)) {
+    parts.push(formatEta(etaSeconds));
+  }
+
   if ($('ab-batch-progress-text')) {
     $('ab-batch-progress-text').textContent = `${run?.title || 'Prompt A/B 批量'} · ${getConversationStatusLabel(run?.status || '')} · 已完成 ${terminal}/${total || 0}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
   }

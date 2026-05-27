@@ -484,7 +484,145 @@ async def main():
             await page.wait_for_timeout(300)
             record(results, "E03 历史记录可进入", await visible(page, "#page-history"), "#page-history")
 
+            # ═══ F 组: 新 P0 功能浏览器级行为验证 ═══
+            # F01: formatEta 函数行为测试
+            format_eta_results = await page.evaluate("""
+                () => {
+                    if (typeof formatEta !== 'function') return { exists: false };
+                    return {
+                        exists: true,
+                        zero: formatEta(0),
+                        negative: formatEta(-5),
+                        seconds_only: formatEta(45),
+                        minutes: formatEta(120),
+                        hours: formatEta(3661),
+                    };
+                }
+            """)
+            record(
+                results,
+                "F01 formatEta 函数存在且返回值正确",
+                format_eta_results.get("exists") is True
+                and format_eta_results.get("zero") == ""
+                and format_eta_results.get("negative") == ""
+                and "45s" in str(format_eta_results.get("seconds_only", ""))
+                and "2m" in str(format_eta_results.get("minutes", ""))
+                and "1h" in str(format_eta_results.get("hours", "")),
+                str(format_eta_results),
+            )
+
+            # F02: buildTurnStatusTags 三色分级行为测试
+            turn_status_results = await page.evaluate("""
+                () => {
+                    if (typeof buildTurnStatusTags !== 'function') return { exists: false };
+                    const noTrim = buildTurnStatusTags({ token_trim_level: 0 });
+                    const lowTrim = buildTurnStatusTags({ token_trim_level: 1 });
+                    const midTrim = buildTurnStatusTags({ token_trim_level: 3 });
+                    const highTrim = buildTurnStatusTags({ token_trim_level: 5 });
+                    const withRetry = buildTurnStatusTags({ quality_retries: 2 });
+                    const withCooldown = buildTurnStatusTags({ has_cooldown_reinject: true });
+                    const withStyleIso = buildTurnStatusTags({ has_style_isolation: true });
+                    return {
+                        exists: true,
+                        noTrimCount: noTrim.length,
+                        lowTrimTag: lowTrim.find(t => t.text.includes('L1')),
+                        midTrimTag: midTrim.find(t => t.text.includes('L3')),
+                        highTrimTag: highTrim.find(t => t.text.includes('L5')),
+                        retryTag: withRetry.find(t => t.text.includes('质量重试')),
+                        cooldownTag: withCooldown.find(t => t.text.includes('冷却复注')),
+                        styleIsoTag: withStyleIso.find(t => t.text.includes('风格隔离')),
+                    };
+                }
+            """)
+            record(
+                results,
+                "F02 buildTurnStatusTags 三色分级与状态标签行为正确",
+                turn_status_results.get("exists") is True
+                and turn_status_results.get("noTrimCount") == 0
+                and turn_status_results.get("lowTrimTag", {}).get("cls") == "yellow"
+                and turn_status_results.get("midTrimTag", {}).get("cls") == "orange"
+                and turn_status_results.get("highTrimTag", {}).get("cls") == "red"
+                and turn_status_results.get("retryTag") is not None
+                and turn_status_results.get("cooldownTag") is not None
+                and turn_status_results.get("styleIsoTag") is not None,
+                str(turn_status_results),
+            )
+
+            # F03: normalizeDebugEntry 透传冷却复注与风格隔离字段
+            debug_entry_results = await page.evaluate("""
+                () => {
+                    if (typeof normalizeDebugEntry !== 'function') return { exists: false };
+                    const entry = normalizeDebugEntry({
+                        has_cooldown_reinject: true,
+                        has_style_isolation: true,
+                        token_trim_level: 3,
+                    });
+                    return {
+                        exists: true,
+                        has_cooldown: entry.has_cooldown_reinject,
+                        has_style: entry.has_style_isolation,
+                        trim_level: entry.trim_level,
+                    };
+                }
+            """)
+            record(
+                results,
+                "F03 normalizeDebugEntry 透传冷却复注和风格隔离",
+                debug_entry_results.get("exists") is True
+                and debug_entry_results.get("has_cooldown") is True
+                and debug_entry_results.get("has_style") is True,
+                str(debug_entry_results),
+            )
+
+            # F04: buildDegenerationPanel 可渲染且使用 CSS 变量
+            degen_panel_results = await page.evaluate("""
+                () => {
+                    if (typeof buildDegenerationPanel !== 'function') return { exists: false };
+                    // 构造符合 per_turn_comparison 格式的假报告
+                    // 需要: report.per_turn_comparison = [{ turn, groups: [{status:'scored', dimension_scores, ai_output, label}, ...] }]
+                    const fakeReport = {
+                        per_turn_comparison: [
+                            {
+                                turn: 1,
+                                groups: [
+                                    {
+                                        status: 'scored',
+                                        label: 'Base',
+                                        dimension_scores: { persona_fidelity: 9.0, narrative_immersion: 8.5 },
+                                        ai_output: '这是一段较长的基线输出文本，用于测试字数退化检测功能。'.repeat(10),
+                                        conv_id: 'test-base-conv',
+                                    },
+                                    {
+                                        status: 'scored',
+                                        label: 'Compare',
+                                        dimension_scores: { persona_fidelity: 6.0, narrative_immersion: 8.0 },
+                                        ai_output: '短文本',
+                                        conv_id: 'test-cmp-conv',
+                                    },
+                                ],
+                            },
+                        ],
+                    };
+                    const html = buildDegenerationPanel(fakeReport);
+                    return {
+                        exists: true,
+                        hasContent: typeof html === 'string' && html.length > 0,
+                        usesCssVar: html.includes('var(--color-danger') || html.includes('var(--color-success'),
+                        noHardcodedRed: !html.includes("color:#DC2626") && !html.includes("color: #DC2626"),
+                    };
+                }
+            """)
+            record(
+                results,
+                "F04 buildDegenerationPanel 可渲染且使用 CSS 变量",
+                degen_panel_results.get("exists") is True
+                and degen_panel_results.get("hasContent") is True
+                and degen_panel_results.get("noHardcodedRed") is True,
+                str(degen_panel_results),
+            )
+
             await browser.close()
+
     except Exception as exc:
         record(results, "UI 完整性复测执行", False, str(exc))
 

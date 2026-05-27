@@ -181,6 +181,8 @@ def _build_initial_run_payload(data: OrchestrationRunCreate) -> tuple[dict, dict
 def _summarize_state(state: dict | None) -> dict:
     groups = list((state or {}).get("groups", []) or [])
     total_items = 0
+    total_planned_turns = 0
+    total_completed_turns = 0
     counts = {
         "pending_items": 0,
         "queued_items": 0,
@@ -196,6 +198,8 @@ def _summarize_state(state: dict | None) -> dict:
     for group in groups:
         for item in group.get("items", []) or []:
             total_items += 1
+            total_planned_turns += int(item.get("planned_turns", 0) or 0)
+            total_completed_turns += int(item.get("turn_count", 0) or 0)
             status = str(item.get("status", "pending") or "pending").strip().lower()
             if status == "scoring":
                 if bool(item.get("scoring_active")):
@@ -212,6 +216,15 @@ def _summarize_state(state: dict | None) -> dict:
     counts["terminal_items"] = (
         counts["completed_items"] + counts["failed_items"] + counts["cancelled_items"]
     )
+    # ETA calculation
+    avg_latency = float((state or {}).get("avg_latency", 12.0) or 12.0)
+    concurrency = max(1, int((state or {}).get("concurrency", 1) or 1))
+    remaining = max(0, total_planned_turns - total_completed_turns)
+    eta_seconds = (remaining * avg_latency) / concurrency if concurrency > 0 else 0.0
+    counts["total_planned_turns"] = total_planned_turns
+    counts["total_completed_turns"] = total_completed_turns
+    counts["avg_latency"] = round(avg_latency, 2)
+    counts["eta_seconds"] = round(eta_seconds, 1)
     return counts
 
 
@@ -304,7 +317,13 @@ def _public_run(run: dict | None) -> dict | None:
     state = run.get("state", {}) or {}
     manifest = deepcopy(run.get("manifest", {}) or {})
     groups = [_public_group(group) for group in state.get("groups", []) or []]
-    summary = _summarize_state({"groups": groups})
+    # Reuse pre-computed summary from _refresh_run_state (contains ETA fields);
+    # fallback to recalculation only if state has no summary yet.
+    summary = state.get("summary") or _summarize_state({
+        "groups": groups,
+        "avg_latency": state.get("avg_latency", 12.0),
+        "concurrency": run.get("concurrency", 1),
+    })
     return {
         "id": run.get("id", ""),
         "kind": run.get("kind", ""),
@@ -461,6 +480,7 @@ async def _refresh_run_state(run_id: str, *, persist: bool = True) -> dict | Non
     state = deepcopy(run.get("state", {}) or {})
     manifest_groups = list((run.get("manifest", {}) or {}).get("groups", []) or [])
     groups = list(state.get("groups", []) or [])
+    all_latencies: list[float] = []
     for group_index, group in enumerate(groups):
         items = list(group.get("items", []) or [])
         manifest_group = manifest_groups[group_index] if group_index < len(manifest_groups) else {}
@@ -484,6 +504,11 @@ async def _refresh_run_state(run_id: str, *, persist: bool = True) -> dict | Non
                     item["error"] = item.get("error") or "关联会话不存在"
                 continue
             metrics = _compute_turn_metrics(conversation)
+            # Collect latency inside existing loop (zero extra DB queries)
+            for _result in conversation.get("results") or []:
+                _lat = float(_result.get("latency_s") or 0.0)
+                if _lat > 0:
+                    all_latencies.append(_lat)
             manifest_item = manifest_items[item_index] if item_index < len(manifest_items) else {}
             payload = manifest_item.get("payload", {}) or {}
             auto_scoring_enabled = _is_auto_scoring_enabled(
@@ -526,8 +551,14 @@ async def _refresh_run_state(run_id: str, *, persist: bool = True) -> dict | Non
             item["updated_at"] = metrics["updated_at"]
             item["resume_supported"] = bool(conversation.get("resume_supported"))
         group["status"] = _derive_group_status(items)
+
     state["groups"] = groups
-    state["summary"] = _summarize_state(state)
+    state["avg_latency"] = sum(all_latencies) / len(all_latencies) if all_latencies else 12.0
+    state["summary"] = _summarize_state({
+        **state,
+        "avg_latency": state["avg_latency"],
+        "concurrency": run.get("concurrency", 1),
+    })
     next_status = _derive_run_status(str(run.get("status", "pending") or "pending"), state)
     if persist:
         updated = db.update_orchestration_run(run_id, status=next_status, state=state)
