@@ -16,7 +16,7 @@
 | ~~D4~~ | ~~前端 mode 切换~~ | ~~复用 longform `index.html` + Tab + URL hash（ADR-007）~~ | ~~一致~~ | � **原判推翻** | **2026-05-28 复审合并到 D11** |
 | ~~D5~~ | ~~短文前端规范~~ | ~~v1.8 §附录 B 仅作 UI mock 参考~~ | ~~已实现独立 `page-shortform` 子工具~~ | � **原判推翻** | **2026-05-28 复审误判，合并到 D11** |
 | D6 | scoring 端点拆分 | 长文 v5.9 / 短文 v1.8 各自独立 | scoring.py 单文件承载 30+ 端点（长短共用） | 🟡 待重构 | 📋 v6.x 跟踪 |
-| D7 | 桥接 scenarios tags | API v0.1 §2.6 含 `tags` 字段 | 实现未提供 `tags`（保留 `name` + `phases`） | 🟢 兼容 | 📌 v6.1 补 |
+| D7 | 桥接 scenarios tags | API v0.1 §2.6 含 `tags` 字段 | **实际已实现**：`scripts/verify_mode_switching.py:define_scenarios` 已含 `tags` 数组（S4~S14 共 10 个场景） | 🟢 一致 | ✅ 2026-05-29 cd7f186+2 复核更正 |
 | **D11** | **F4 前端融合整体未接入**（2026-05-28 复审发现） | ADR-007 顶部 3 Tab + script 引用 + page-shortform/page-bridge 容器 + setMode 生效 | **0% 实施**：index.html 未改 + 5 个新文件 100% untracked + DOM 全部缺失 | 🔴 **严重** | ✅ v6.0 cd7f186+1 清理死代码，F4 顺延 v6.1 |
 
 ---
@@ -137,15 +137,28 @@ GET /api/bridge/scenarios?sf_turns=5&lf_turns=12
 - DOM 容器可被 Playwright `page.locator('#xxx').count() > 0` 抢到。
 - setMode / fetch 拦截器在 console 有预期日志。
 
-### D7: 桥接 scenarios tags（v6.1 补）
+### D7: 桥接 scenarios tags（✅ 已实现 / cd7f186+2 复核更正）
 
 **PRD 期望**：API v0.1 §2.6 Response schema 中含 `tags: ["核心路径", "异质包夹"]`。
 
-**实际实施**：`define_scenarios` 函数返回 `{name, phases}`，未含 `tags`。
+**实际实施**：`scripts/verify_mode_switching.py:define_scenarios` 函数返回 `{name, tags, phases}`，**tags 字段已实现**。10 个场景的 tags 示例：
 
-**影响**：低 — 前端可基于 name 推导分类。
+| 场景 | tags |
+|------|------|
+| S4_纯长文 | `["核心路径", "纯长文"]` |
+| S5_短→长 | `["核心路径", "正向切换"]` |
+| S6_长→短 | `["核心路径", "反向切换"]` |
+| S7_短→长→关闭→续接 | `["边界", "短到长", "异质包夹"]` |
+| S8_短→长→短 | `["复合切换", "三段式"]` |
+| S9_长→短→关闭→续接 | `["边界", "长到短", "异质包夹"]` |
+| S10_长→短→长 | `["复合切换", "三段式", "镜像"]` |
+| S11_频繁切换 | `["压力测试", "频繁切换"]` |
+| S12_新会话 | `["边界", "新会话"]` |
+| S14_摘要延迟 | `["边界", "摘要延迟"]` |
 
-**建议**：v6.1 在 `verify_mode_switching.py:define_scenarios` 内补 `tags` 字段，向后兼容。
+**HTTP 验证**：`curl /api/bridge/scenarios?sf_turns=3&lf_turns=5` 实测响应含完整 tags 数组。
+
+**结论**：与 PRD API v0.1 §2.6 100% 一致，无后续动作。本文档旧版 "未含 tags" 声明为已过时记录，cd7f186+2 hotfix 一并更正。
 
 ---
 

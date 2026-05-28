@@ -4,10 +4,12 @@ import json
 import logging
 import time
 import asyncio
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import database as db
+from config import DEFAULT_PRIMARY_MODEL, DEFAULT_PRIMARY_MODEL_SHORTFORM
 from services.conversation_service import ConversationService
 from services.scoring_service import ScoringService, invoke_score_turn_compat
 from services.format_lint_core import (
@@ -22,8 +24,25 @@ from services.quality_guard import QualityGuard
 
 logger = logging.getLogger(__name__)
 
-# 全局内存跟踪摘要生成状态
-_summary_tasks: dict[int, str] = {}
+# 全局内存跟踪摘要生成状态 (P1-2 hotfix: LRU 限容防长期内存泄漏)
+# 容量上限 1000; 超出时淘汰最旧 entry (FIFO 顺序)
+_MAX_SUMMARY_TASKS = 1000
+_summary_tasks: "OrderedDict[int, str]" = OrderedDict()
+
+
+def _set_summary_task(switch_id: int, status: str) -> None:
+    """LRU 写入 _summary_tasks: 满容量时淘汰最旧 entry.
+
+    P1-2 hotfix (cd7f186+2, 2026-05-29): 原 dict 写入永不清理,
+    长期运行可能内存泄漏. 改 OrderedDict 限容 1000 条.
+    """
+    if switch_id in _summary_tasks:
+        _summary_tasks.move_to_end(switch_id)
+    _summary_tasks[switch_id] = status
+    while len(_summary_tasks) > _MAX_SUMMARY_TASKS:
+        _summary_tasks.popitem(last=False)
+
+
 # 线程池用于异步摘要生成
 _summary_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bridge-summary")
 
@@ -68,9 +87,12 @@ class BridgeService:
         if db_from_mode == db_to_mode:
             raise ValueError("源模式和目标模式不能相同")
 
-        # 默认模型解析 (ADR-004)
+        # 默认模型解析 (ADR-004): P0-3 hotfix 从 config 常量取值, 避免与 ADR-004 矩阵分叉
         if not target_model:
-            target_model = "deepseek-v4-pro" if db_to_mode == "long" else "doubao-lite"
+            target_model = (
+                DEFAULT_PRIMARY_MODEL if db_to_mode == "long"
+                else DEFAULT_PRIMARY_MODEL_SHORTFORM
+            )
 
         # 1. 在数据库中创建记录获取 switch_id
         switch_id = db.create_mode_switch(
@@ -225,14 +247,14 @@ class BridgeService:
                 latency_ms=0,
                 delayed=True,
             )
-            _summary_tasks[switch_id] = "delayed"
+            _set_summary_task(switch_id, "delayed")
             return {
                 "session_id": session_id,
                 "summary_status": "delayed",
                 "estimated_latency_s": 0.0,
             }
 
-        _summary_tasks[switch_id] = "generating"
+        _set_summary_task(switch_id, "generating")
 
         # 派发到线程池执行
         _summary_executor.submit(
@@ -331,7 +353,7 @@ class BridgeService:
                 delayed=False,
             )
 
-            _summary_tasks[switch_id] = "completed"
+            _set_summary_task(switch_id, "completed")
         except Exception as e:
             logger.exception("异步生成摘要工作线程发生异常 switch_id=%s: %s", switch_id, e)
             db.update_mode_switch_summary(
@@ -343,7 +365,7 @@ class BridgeService:
                 latency_ms=0,
                 delayed=False,
             )
-            _summary_tasks[switch_id] = "failed"
+            _set_summary_task(switch_id, "failed")
 
     async def generate_first_response_and_score(
         self,

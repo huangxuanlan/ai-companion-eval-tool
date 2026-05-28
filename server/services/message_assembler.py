@@ -151,10 +151,23 @@ def _format_v52_summary_block(dialogue_summary: str, memory_context: str) -> str
 
 
 def _target_mode_for_model(model_id: str) -> str:
+    """根据模型 ID 隐式推断目标 mode（fallback 路径，优先用显式 mode 参数）
+
+    P0-2 修复（cd7f186+2 hotfix，2026-05-29）：
+    - 显式列出 short 系列模型白名单，避免 deepseek-v4-flash 被默认推成 long
+    - 命中关键字：doubao* / *-flash / *-mini / *-lite → short
+    - 其他默认 → long（保持向后兼容）
+    """
     normalized = str(model_id or "").strip().lower()
     if normalized.startswith("qwen") or "qwen3.6-plus" in normalized:
         return "long"
-    if "doubao" in normalized:
+    # P0-2 hotfix: 短文系列模型白名单（flash / mini / lite / doubao）
+    if (
+        "doubao" in normalized
+        or "-flash" in normalized
+        or "-mini" in normalized
+        or "-lite" in normalized
+    ):
         return "short"
     return "long"
 
