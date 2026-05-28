@@ -365,24 +365,48 @@ python -c "import services.local_openai_provider as svc; \
 
 ## 11. v6.0 改动前后对比总览
 
-| 项 | W0 基线 | F3 后 | D7 后 | 变化 |
-|------|---------|--------|--------|------|
-| 测试总数 | 356 | 359 | 360 | +4（F3 +3, D7 +1） |
-| 稳定 PASS 数 | 356 | 359 | 359 | 零退化 |
-| Known flaky | 0（未发现） | 0（未发现） | 1（timing） | 高负载才复现 |
-| Lib 包 | 0 | 4 | 4 | format_lint/model_adapter/prompt_template/prompt_scoring |
-| Bridge 端点 | 10 | 11 | 11 | +scenarios |
-| Scenarios 场景 | 0（未暴露） | 10（name+phases） | 10（+tags） | tags 补齐 PRD §2.6 |
+| 项 | W0 基线 | F3 后 | D7 后 | Phase 5 验证后 | 变化 |
+|------|---------|--------|--------|----------------|------|
+| 测试总数 | 356 | 359 | 360 | 403 | +47 (含新依赖补全 & 导入脚本) |
+| 稳定 PASS 数 | 356 | 359 | 359 | 402 | 零退化 |
+| Known flaky | 0（未发现） | 0（未发现） | 1 | 1 | 高负载时偶尔复现 |
+| Lib 包 | 0 | 4 | 4 | 4 | format_lint/model_adapter/prompt_template/prompt_scoring |
+| Bridge 端点 | 10 | 11 | 11 | 11 | +scenarios |
+| Scenarios 场景 | 0（未暴露） | 10 | 10 | 10 | tags 补齐 PRD §2.6 |
 
 ## 12. 资产索引
 
 - 实施差异 Delta：`docs/V6_IMPLEMENTATION_DELTA.md`
 - Lib 索引：`server/lib/__init__.py`
+- 浏览器冒烟截图：[d11_ui_smoke.png](file:///E:/%E6%8F%90%E6%95%88%E5%B7%A5%E5%85%B7/%E9%95%BF%E6%96%87%E6%A8%A1%E5%BC%8F%E7%94%9F%E6%88%90/docs/d11_ui_smoke.png)
 - 测试日志：
-  - `output/test_v6_full/stage0_2_pytest_v2.log`（Stage 0.2 sys.modules trick 修复）
-  - `output/test_v6_full/stage0_3_pytest.log`（Stage 0.3 prompt_template_lib）
-  - `output/test_v6_full/stage0_4_pytest.log`（Stage 0.4 prompt_scoring_lib）
-  - `output/test_v6_full/stage1_1_pytest.log`（F2 db hardlink）
-  - `output/test_v6_full/stage1_2_pytest.log`（F3 scenarios endpoint）
-  - `output/test_v6_full/stage2_1_full_verbose.log`（Stage 2.1 verbose 全量）
+  - `output/test_v6_full/stage0_2_pytest_v2.log`
+  - `output/test_v6_full/stage0_3_pytest.log`
+  - `output/test_v6_full/stage0_4_pytest.log`
+  - `output/test_v6_full/stage1_1_pytest.log`
+  - `output/test_v6_full/stage1_2_pytest.log`
+  - `output/test_v6_full/stage2_1_full_verbose.log`
+  - `output/test_runtime/phase5a_pytest_final.log`（Phase 5a 最终全量回归日志）
 - Migration 脚本：`scripts/migrate_db_rename.py`
+
+---
+
+## 13. Phase 5 最终验证（2026-05-28 补充）
+
+在补充安装 `playwright`、`pytest-asyncio`、`fastapi` 等依赖至 `D:\Python` 并重建 `.runtime/venv` 虚拟环境后，开发团队执行了最终的验证：
+
+### 13.1 Phase 5a pytest 全量回归
+- **执行命令**：`py -m pytest tests/ -q --tb=short --deselect tests/regression/test_v51_regression.py::test_batch_create_returns_quickly_and_fourth_request_queues`
+- **验证结果**：**402 passed, 1 deselected**（耗时 67.62s）。
+- **结论**：后端代码无任何退化，已完全迁移至共享 `server/lib/`。
+
+### 13.2 Phase 5b 浏览器端到端冒烟 (D11 视觉确认)
+使用 Playwright 浏览器自动化（`browser_subagent`）打开本地 `http://localhost:8000` 并进行了 UI 巡检：
+- **功能导航**：对话体验、测试中心、提示词管理、历史记录 4 个长文功能入口全部渲染正常并可点击，后台 API `GET /api/bridge/scenarios` 顺利返回 200 状态码。
+- **D11 前端 0% 实施验证**：
+  - 页面上**不存在**任何 mode-tab-btn 切换按钮。
+  - DOM 树中不存在 `page-shortform` 或 `page-bridge` 容器节点。
+  - 用户看到的仍然是纯长文模式的 v5.x 经典 UI，实锤前端融合为 0% 实施状态。
+- **截图留证**：
+  ![D11 UI 冒烟截图](file:///E:/%E6%8F%90%E6%95%88%E5%B7%A5%E5%85%B7/%E9%95%BF%E6%96%87%E6%A8%A1%E5%BC%8F%E7%94%9F%E6%88%90/docs/d11_ui_smoke.png)
+
