@@ -160,31 +160,44 @@ python -c "import services.local_openai_provider as svc; \
 - 42 个 ERROR 行都是日志中的「豆包 Mini API 调用失败 Connection error」（外部网络噪音）+ 测试名含 error，实际无失败。
 - pytest 权威结果：**359 passed in 72.52s**。
 
-### 4.2 Stage 2.2 UI 层 HTTP 探测 (13/13 PASS)
+### 4.2 Stage 2.2 UI 层 HTTP 探测 — ⚠️ 测试方法学错误 + 虚假声明已纠正（2026-05-28 复审）
 
-**A 组 模式切换器（HTML 含元素验证）**：
+> **2026-05-28 11:50 复审结论**：本节原标记 13/13 PASS 是测试方法学错误。实际 v6.0 cd7f186 提交**未动 `index.html`**，5 个新增前端文件 100% untracked，从未被静态 HTML 引用，F4 前端融合实际是 0% 实施。原"✅"基于「文件可通过 HTTP 200 访问」误判为「前端已接入」。
+>
+> **铁证**：
+> - `git diff cd7f186^ cd7f186 --stat -- server/static/` → 空输出
+> - `git ls-files server/static/js/mode_controller.js` → did not match any file
+> - `index.html` 全文 grep `shortform / bridge / mode_controller / page-shortform / mode-tab-btn` → **0 处匹配**
+> - 5 个文件 git status 状态全部为 `??`（untracked）
+>
+> **处置**（v6.0 cd7f186+1 commit）：
+> 1. 删除 5 个 untracked 死代码文件（mode_controller.js / shortform_module.js / bridge_panel.js / shortform.css / bridge.css）
+> 2. F4 前端融合顺延到 v6.1（全新实施 + Playwright E2E 真验证）
+> 3. v6.0 GA 仅声明「**后端融合 100%**」，前端用户感受到 0 变化（仍是长文 5 page UI）
 
-| 检查项 | 结果 |
+**A 组 模式切换器（修正后真实状态）**：
+
+| 检查项 | v6.0 实际状态 |
 |------|------|
-| `mode-tab-switcher` 元素 | ✅ |
-| `setMode('longform')` 调用 | ✅ |
-| `setMode('shortform')` 调用 | ✅ |
-| `setMode('bridge')` 调用 | ✅ |
-| `id="page-shortform"` 容器 | ✅ |
-| `id="page-bridge"` 容器 | ✅ |
-| `mode_controller.js` 静态引用 | ✅ |
+| `mode-tab-switcher` 元素 | ❌ DOM 不存在 |
+| `setMode('longform')` 调用 | ❌ 函数文件未被 index.html 引用 |
+| `setMode('shortform')` 调用 | ❌ 同上 |
+| `setMode('bridge')` 调用 | ❌ 同上 |
+| `id="page-shortform"` 容器 | ❌ DOM 不存在 |
+| `id="page-bridge"` 容器 | ❌ DOM 不存在 |
+| `mode_controller.js` 静态引用 | ❌ index.html 0 处引用 |
 
-**B/C 组 静态资源加载**：
+**B/C 组 静态资源 — 误判说明**：
 
-| 资源 | 大小 | 结果 |
-|------|------|------|
-| `/static/js/mode_controller.js` | 6472 bytes | ✅ |
-| `/static/js/shortform_module.js` | 35812 bytes | ✅ 懒加载 |
-| `/static/js/bridge_panel.js` | 19884 bytes | ✅ 懒加载 |
-| `/static/css/shortform.css` | 4165 bytes | ✅ |
-| `/static/css/bridge.css` | 2882 bytes | ✅ |
+| 资源 | 文件存在 | index.html 引用 | git tracked | v6.1 处置 |
+|------|---------|----------------|------------|---------|
+| `/static/js/mode_controller.js` | 仅在工作树（untracked）| ❌ | ❌ | 删除，v6.1 重做 |
+| `/static/js/shortform_module.js` | 同上 | ❌ | ❌ | 删除（违反 ADR-007）|
+| `/static/js/bridge_panel.js` | 同上 | ❌ | ❌ | 删除，v6.1 按 ADR-006 重做 |
+| `/static/css/shortform.css` | 同上 | ❌ | ❌ | 删除 |
+| `/static/css/bridge.css` | 同上 | ❌ | ❌ | 删除，v6.1 重做 |
 
-**关键设计澄清**：`shortform_module.js` 和 `bridge_panel.js` 不在 HTML 静态 `<script>` 引用，而是通过 `mode_controller.js` 的 `lazyLoadScript()` 函数（第 165/197 行）按需注入。这是 v6.0 模式切换的核心设计（按需加载，提升首屏性能），不是缺陷。
+**~~关键设计澄清~~**（已撤回）：原文称「`shortform_module.js` 通过 `mode_controller.js` 的 `lazyLoadScript()` 按需注入」，实际 `mode_controller.js` 本身从未被 index.html 引用，`lazyLoadScript()` 永远不会执行。这是测试团队误判，已纠正。
 
 **E 组追加 关键 API 端点**：
 
@@ -231,7 +244,7 @@ python -c "import services.local_openai_provider as svc; \
 | ADR-004 | 模型矩阵（pro/flash/lite/v4） | DEFAULT_PRIMARY_MODEL_SHORTFORM = deepseek-v4-flash | 🟢 一致 |
 | ADR-005 | 共享 library | 4 个 lib 全部抽取 + sys.modules trick | 🟢 完全一致（D2） |
 | ADR-006 | 桥接体验 | 9 端点（含新增 scenarios） | 🟢 增强（D3） |
-| ADR-007 | 前端 mode 切换 | 复用 index.html + Tab + URL hash + 懒加载 | 🟢 一致（D4） |
+| ADR-007 | 前端 mode 切换 | **0% 实施** — index.html 未改 + 5 个新文件 untracked + DOM 缺失 | � **未实施**（D5/D11，2026-05-28 复审纠正） |
 
 #### 4.4.2 桥接 API v0.1 端点对照
 
@@ -300,6 +313,7 @@ python -c "import services.local_openai_provider as svc; \
 | Playwright 浏览器交互层未执行 | HTTP 探测能覆盖 80%+，剩余靠手测 | 🟢 低 | 可选，v6.1 加入 CI |
 | scoring router 单文件 2000+ 行 | 长短桥共用 30+ 端点 | 🟡 中 | v6.1 按 mode 拆分 |
 | 短文前端规范 v1.8 §附录 B 部分采纳 | Reset 按钮 / 历史栈视图未实施 | 🟢 低 | PM 决策是否回写 PRD |
+| **F4 前端融合整体未接入**（D11 复审发现） | index.html 未改 + 5 文件 untracked + DOM 缺失 | 🔴 **严重** | **顺延 v6.1 全新实施 + Playwright E2E 真验证**；v6.0 GA 仅声明后端融合 |
 
 ## 7. Top 优秀测试
 
@@ -319,9 +333,9 @@ python -c "import services.local_openai_provider as svc; \
 | Lib 抽取一致性 | 4/4 (100%) | sys.modules alias trick 是关键，让 9 个 services shim 模式统一 |
 | Bridge 端点完整性 | 11/11 (100%) | F3 补齐后达 PRD §1.0 完全覆盖 |
 | 长短桥消息拼接 | 79/79 (100%) | v5.1 回归测试体系覆盖三模式所有路径 |
-| 前端 mode 切换 | 13/13 (100%) | HTTP 层验证全 PASS，懒加载设计与 ADR-007 一致 |
+| 前端 mode 切换 | **0/7 (0%)**（2026-05-28 复审纠正） | 原 13/13 PASS 是测试方法学错误（把「文件 HTTP 200」误等于「前端已接入」），实际 index.html 0 处引用 |
 | MECE 场景覆盖 | 10/14 (71% 直接 + 29% 合并/跳过) | S1-S14 中 4 项无需独立测，符合 v5.9 设计 |
-| PRD ↔ 实施一致性 | 13/14 (93%) | 1 项 D5 部分采纳需 PM 决策 |
+| PRD ↔ 实施一致性 | **后端 13/13 (100%) + 前端 0/1 (0%)** | ADR-001~006 后端全合规；ADR-007 前端 0% 实施，顺延 v6.1（D11 复审）|
 
 ## 10. 后续动作
 
@@ -330,9 +344,10 @@ python -c "import services.local_openai_provider as svc; \
 | Stage 2.3 真 LLM 冒烟 | P0 | ✅ 完成 | S5+S6 baseline 全 PASS（Run 2 @ 04:10） |
 | 端到端 server 启动冒烟 | P0 | ✅ 完成 | 6/6 PASS（含 scenarios 反探 + DB hardlink 验证） |
 | D7 scenarios 加 tags 字段 | P2 | ✅ 完成 | 10 场景全部加 tags + 1 新测试，全量回归 360 PASS （含 1 known flaky） |
-| D5 PM 审批短文前端规范偏差 | P1 | ⏳ 待 PM | v6.0 复盘会 |
+| D5 PM 审批短文前端规范偏差 | ~~P1~~ | 🔴 **重新定性为 D11**（2026-05-28 复审）| 原判「短文独立化」是误判，实际 F4 前端 0% 实施 |
+| **D11 F4 前端融合 0% 实施 — 顺延 v6.1** | P0 | ⏳ v6.1 | 含顶部 3 Tab / page-bridge / 长文 page mode 适配 / Playwright E2E（5-7 人天）|
 | D6 scoring router 拆分 ROI 评估 | P2 | ⏳ 待评估 | v6.1 sprint planning |
-| Playwright E2E CI 集成 | P2 | ⏳ 待集成 | v6.1 |
+| Playwright E2E CI 集成 | P2 | ⏳ 必须集成 | v6.1（避免再次出现「文件 200 = 接入」误判）|
 
 ### Known Flaky Tests（与 v6.0 无关）
 
