@@ -402,25 +402,25 @@ def define_scenarios(sf_turns: int, lf_turns: int) -> list[dict]:
     close_sf = min(8, sf_turns)       # S9: 切换后不到20轮就关闭
     return [
         # ── S4: 纯长文≥10轮 ──
-        {"name": f"S4_纯长文{lf_turns}轮", "phases": [
+        {"name": f"S4_纯长文{lf_turns}轮", "tags": ["核心路径", "纯长文"], "phases": [
             {"mode": "long", "turns": lf_turns, **lf},
         ]},
 
         # ── S5: 短→长 ──
-        {"name": f"S5_短{sf_turns}→长{lf_turns}", "phases": [
+        {"name": f"S5_短{sf_turns}→长{lf_turns}", "tags": ["核心路径", "正向切换"], "phases": [
             {"mode": "short", "turns": sf_turns, **sf},
             {"mode": "long", "turns": lf_turns, **lf},
         ]},
 
         # ── S6: 长→短 ──
-        {"name": f"S6_长{lf_turns}→短{sf_turns}", "phases": [
+        {"name": f"S6_长{lf_turns}→短{sf_turns}", "tags": ["核心路径", "反向切换"], "phases": [
             {"mode": "long", "turns": lf_turns, **lf},
             {"mode": "short", "turns": sf_turns, **sf},
         ]},
 
         # ── S7: 短→长，<10轮关闭，跨会话续接 ──
         # 模拟：短文5轮 → 切换长文4轮 → "关闭"(清空session) → 重新桥接长文续接5轮
-        {"name": f"S7_短{sf_turns}→长{close_lf}_关闭→续接长5", "phases": [
+        {"name": f"S7_短{sf_turns}→长{close_lf}_关闭→续接长5", "tags": ["边界", "短到长", "异质包夹"], "phases": [
             {"mode": "short", "turns": sf_turns, **sf},
             {"mode": "long", "turns": close_lf, **lf},
             # 第三段"重开"：同模式(long→long)不会触发bridge，
@@ -430,7 +430,7 @@ def define_scenarios(sf_turns: int, lf_turns: int) -> list[dict]:
         ]},
 
         # ── S8: 短→长→短 ──
-        {"name": f"S8_短{sf_turns}→长5→短{sf_turns}", "phases": [
+        {"name": f"S8_短{sf_turns}→长5→短{sf_turns}", "tags": ["复合切换", "三段式"], "phases": [
             {"mode": "short", "turns": sf_turns, **sf},
             {"mode": "long", "turns": lf_turns, **lf},
             {"mode": "short", "turns": sf_turns, **sf},
@@ -438,7 +438,7 @@ def define_scenarios(sf_turns: int, lf_turns: int) -> list[dict]:
 
         # ── S9: 长→短，<20轮关闭，跨会话续接 ──
         # 模拟：长文8轮 → 切换短文5轮 → "关闭" → 重新桥接短文续接5轮
-        {"name": f"S9_长{lf_turns}→短{sf_turns}_关闭→续接短5", "phases": [
+        {"name": f"S9_长{lf_turns}→短{sf_turns}_关闭→续接短5", "tags": ["边界", "长到短", "异质包夹"], "phases": [
             {"mode": "long", "turns": lf_turns, **lf},
             {"mode": "short", "turns": sf_turns, **sf},
             # 用 long 0轮触发桥接
@@ -447,14 +447,14 @@ def define_scenarios(sf_turns: int, lf_turns: int) -> list[dict]:
         ]},
 
         # ── S10: 长→短→长（S8 镜像）──
-        {"name": f"S10_长{lf_turns}→短{sf_turns}→长{lf_turns}", "phases": [
+        {"name": f"S10_长{lf_turns}→短{sf_turns}→长{lf_turns}", "tags": ["复合切换", "三段式", "镜像"], "phases": [
             {"mode": "long", "turns": lf_turns, **lf},
             {"mode": "short", "turns": sf_turns, **sf},
             {"mode": "long", "turns": lf_turns, **lf},
         ]},
 
         # ── S11: 频繁切换≥3次（短3→长3→短3→长3→短3）──
-        {"name": "S11_频繁切换_短3长3x4段", "phases": [
+        {"name": "S11_频繁切换_短3长3x4段", "tags": ["压力测试", "频繁切换"], "phases": [
             {"mode": "short", "turns": 3, **sf},
             {"mode": "long", "turns": 3, **lf},
             {"mode": "short", "turns": 3, **sf},
@@ -467,14 +467,14 @@ def define_scenarios(sf_turns: int, lf_turns: int) -> list[dict]:
 
         # ── S12: 开新会话（纯长文后关闭→新会话长文）──
         # 模拟：长文8轮 → "关闭" → 新会话用桥接历史重新开始长文
-        {"name": f"S12_长{lf_turns}_关闭→新会话长{lf_turns}", "phases": [
+        {"name": f"S12_长{lf_turns}_关闭→新会话长{lf_turns}", "tags": ["边界", "新会话"], "phases": [
             {"mode": "long", "turns": lf_turns, **lf},
             {"mode": "short", "turns": 0, **sf},  # 触发桥接
             {"mode": "long", "turns": lf_turns, **lf},
         ]},
 
         # ── S14: 短→长后摘要延迟（跨模式混合取数）──
-        {"name": f"S14_短{sf_turns}→长{lf_turns}_摘要延迟", "phases": [
+        {"name": f"S14_短{sf_turns}→长{lf_turns}_摘要延迟", "tags": ["边界", "摘要延迟"], "phases": [
             {"mode": "short", "turns": sf_turns, **sf},
             {
                 "mode": "long",

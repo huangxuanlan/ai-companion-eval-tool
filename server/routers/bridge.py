@@ -11,7 +11,7 @@ from services.verify_run_service import VerifyRunService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/bridge", tags=["bridge"])
+router = APIRouter(prefix="/api/bridge", tags=["bridge"])
 bridge_service = BridgeService()
 verify_service = VerifyRunService()
 
@@ -151,6 +151,42 @@ async def generate_first_response_endpoint(session_id: str, req: FirstResponseRe
     except Exception as e:
         logger.exception("生成首轮接话接口异常: %s", e)
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+
+
+# ── Scenarios Endpoint（v6.0 F3 补齐，桥接 API v0.1 §2.6）──────────
+
+@router.get("/scenarios")
+def list_scenarios(
+    sf_turns: int = Query(5, ge=1, le=20, description="短文阶段轮数"),
+    lf_turns: int = Query(12, ge=1, le=40, description="长文阶段轮数"),
+):
+    """列出 MECE 测试场景定义 + A/B 配置（直接复用 verify_mode_switching.define_scenarios）"""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    project_root = _Path(__file__).resolve().parent.parent.parent
+    if str(project_root) not in _sys.path:
+        _sys.path.insert(0, str(project_root))
+
+    try:
+        from scripts.verify_mode_switching import define_scenarios as _define
+        scenarios = _define(sf_turns=sf_turns, lf_turns=lf_turns)
+    except Exception as e:
+        logger.warning("加载 verify_mode_switching.define_scenarios 失败，使用 fallback: %s", e)
+        scenarios = [
+            {"name": "S4_纯长文", "tags": ["核心路径", "纯长文"], "phases": [{"mode": "long", "turns": lf_turns}]},
+            {"name": "S5_短→长", "tags": ["核心路径", "正向切换"], "phases": [{"mode": "short", "turns": sf_turns}, {"mode": "long", "turns": lf_turns}]},
+            {"name": "S6_长→短", "tags": ["核心路径", "反向切换"], "phases": [{"mode": "long", "turns": lf_turns}, {"mode": "short", "turns": sf_turns}]},
+        ]
+
+    return {
+        "scenarios": scenarios,
+        "ab_configs": {
+            "baseline": {"label": "线上基线", "bridge_turns": 20, "summary_interval": 10},
+            "optimized": {"label": "优化方案", "bridge_turns": 10, "summary_interval": 5},
+        },
+        "params": {"sf_turns": sf_turns, "lf_turns": lf_turns},
+    }
 
 
 # ── Verify Runs Endpoints ──────────────────────────────────────────

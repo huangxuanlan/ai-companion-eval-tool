@@ -162,8 +162,15 @@ PROFILE_PROMPT_DIR = _resolve_dir(
     fallback=r"E:\工作资料\产品资料\提示词资料\长期记忆",
 )
 
-# ── 数据库 ────────────────────────────────────────────────────
-DB_PATH = Path(os.environ.get("LONGFORM_DB_PATH", str(SERVER_DIR / "longform.db")))
+# ── 数据库（v6.0 ADR-001: longform.db → ops_v6.db，hardlink 兼容期 1 周）────
+# 优先级：OPS_V6_DB_PATH（新）> LONGFORM_DB_PATH（旧，向后兼容）> 默认 ops_v6.db
+# hardlink: server/ops_v6.db ↔ server/longform.db（同一 inode，零复制成本）
+DB_PATH = Path(
+    os.environ.get(
+        "OPS_V6_DB_PATH",
+        os.environ.get("LONGFORM_DB_PATH", str(SERVER_DIR / "ops_v6.db")),
+    )
+)
 
 # ── 默认参数 ──────────────────────────────────────────────────
 DEFAULT_TEMPERATURE = 1.0

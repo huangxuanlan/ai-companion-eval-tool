@@ -42,3 +42,6 @@ Thumbs.db
 
 # === PID 文件 ===
 *.pid
+
+# === Pre-pull 备份目录（v6.0 调试物证，不入库）===
+backups/

@@ -147,7 +147,7 @@ def test_bridge_session_lifecycle(client, mock_adapters):
         "scenario_name": "S5",
         "triggered_by": "user_click",
     }
-    response = client.post("/bridge/sessions", json=payload)
+    response = client.post("/api/bridge/sessions", json=payload)
     assert response.status_code == 201
     data = response.json()
     assert "session_id" in data
@@ -156,7 +156,7 @@ def test_bridge_session_lifecycle(client, mock_adapters):
     session_id = data["session_id"]
 
     # 3. Retrieve session details
-    response = client.get(f"/bridge/sessions/{session_id}")
+    response = client.get(f"/api/bridge/sessions/{session_id}")
     assert response.status_code == 200
     details = response.json()
     assert details["session_id"] == session_id
@@ -164,25 +164,25 @@ def test_bridge_session_lifecycle(client, mock_adapters):
     assert details["status"] == "pending_summary"
 
     # 4. Generate story summary
-    response = client.post(f"/bridge/sessions/{session_id}/summary", json={"summary_model": "deepseek-v4-flash"})
+    response = client.post(f"/api/bridge/sessions/{session_id}/summary", json={"summary_model": "deepseek-v4-flash"})
     assert response.status_code == 200
     summary_data = response.json()
     assert summary_data["summary_status"] == "generating"
 
     # Fetch summary status
-    response = client.get(f"/bridge/sessions/{session_id}/summary")
+    response = client.get(f"/api/bridge/sessions/{session_id}/summary")
     assert response.status_code == 200
     summary_status = response.json()
     assert summary_status["summary_status"] == "completed"
     assert "测试用剧情摘要" in summary_status["switch_summary"]
 
     # Check updated session status
-    response = client.get(f"/bridge/sessions/{session_id}")
+    response = client.get(f"/api/bridge/sessions/{session_id}")
     assert response.json()["status"] == "pending_first_response"
 
     # 5. Generate first response
     response = client.post(
-        f"/bridge/sessions/{session_id}/first-response",
+        f"/api/bridge/sessions/{session_id}/first-response",
         json={"user_input": "你好啊，萧逸。", "thinking_level": "high"}
     )
     assert response.status_code == 200
@@ -194,7 +194,7 @@ def test_bridge_session_lifecycle(client, mock_adapters):
     assert first_res["metrics"]["first_response_paren_pairs"] > 0
 
     # Check session is now completed
-    response = client.get(f"/bridge/sessions/{session_id}")
+    response = client.get(f"/api/bridge/sessions/{session_id}")
     assert response.json()["status"] == "completed"
 
 
@@ -204,7 +204,7 @@ def test_verify_runs_endpoints(client):
         "scripts": ["mece_main"],
         "dry_run": True,
     }
-    response = client.post("/bridge/verify-runs", json=payload)
+    response = client.post("/api/bridge/verify-runs", json=payload)
     assert response.status_code == 201
     run = response.json()
     assert "run_id" in run
@@ -212,21 +212,84 @@ def test_verify_runs_endpoints(client):
     run_id = run["run_id"]
 
     # Get details
-    response = client.get(f"/bridge/verify-runs/{run_id}")
+    response = client.get(f"/api/bridge/verify-runs/{run_id}")
     assert response.status_code == 200
     assert response.json()["run_id"] == run_id
 
     # List verify runs
-    response = client.get("/bridge/verify-runs")
+    response = client.get("/api/bridge/verify-runs")
     assert response.status_code == 200
     runs = response.json()
     assert any(r["run_id"] == run_id for r in runs)
 
     # Delete verify run
-    response = client.delete(f"/bridge/verify-runs/{run_id}")
+    response = client.delete(f"/api/bridge/verify-runs/{run_id}")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
 
     # Get details should fail (404)
-    response = client.get(f"/bridge/verify-runs/{run_id}")
+    response = client.get(f"/api/bridge/verify-runs/{run_id}")
     assert response.status_code == 404
+
+
+# ── F3 Scenarios endpoint（v6.0 补齐 / 桥接 API v0.1 §2.6）──────
+
+def test_get_scenarios_default_params():
+    """GET /api/bridge/scenarios 默认参数返回 MECE 场景 + AB 配置"""
+    client = TestClient(app)
+    resp = client.get("/api/bridge/scenarios")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "scenarios" in body and isinstance(body["scenarios"], list)
+    assert len(body["scenarios"]) >= 3, "至少应有 S4/S5/S6 三个场景"
+    # 每个场景必须含 name 和 phases
+    for sc in body["scenarios"]:
+        assert "name" in sc
+        assert "phases" in sc and isinstance(sc["phases"], list)
+        for ph in sc["phases"]:
+            assert "mode" in ph and ph["mode"] in {"long", "short"}
+            assert "turns" in ph and isinstance(ph["turns"], int)
+    # ab_configs 必须含 baseline + optimized
+    assert "ab_configs" in body
+    ab = body["ab_configs"]
+    assert "baseline" in ab and ab["baseline"]["bridge_turns"] == 20
+    assert "optimized" in ab and ab["optimized"]["bridge_turns"] == 10
+
+
+def test_get_scenarios_custom_params():
+    """GET /api/bridge/scenarios?sf_turns=8&lf_turns=20 自定义参数生效"""
+    client = TestClient(app)
+    resp = client.get("/api/bridge/scenarios?sf_turns=8&lf_turns=20")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["params"]["sf_turns"] == 8
+    assert body["params"]["lf_turns"] == 20
+
+
+def test_get_scenarios_validation():
+    """GET /api/bridge/scenarios 参数越界返回 422"""
+    client = TestClient(app)
+    # sf_turns 超 20 应被拒
+    resp = client.get("/api/bridge/scenarios?sf_turns=99")
+    assert resp.status_code == 422
+    # lf_turns 超 40 应被拒
+    resp = client.get("/api/bridge/scenarios?lf_turns=999")
+    assert resp.status_code == 422
+
+
+def test_get_scenarios_includes_tags():
+    """D7: GET /api/bridge/scenarios 每个场景必须含 tags 字段（PRD §2.6 schema）"""
+    client = TestClient(app)
+    resp = client.get("/api/bridge/scenarios")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["scenarios"]) >= 3
+    for sc in body["scenarios"]:
+        assert "tags" in sc, f"场景 {sc.get('name')} 缺少 tags 字段"
+        assert isinstance(sc["tags"], list), f"tags 必须是列表，实际: {type(sc['tags'])}"
+        assert len(sc["tags"]) >= 1, f"场景 {sc.get('name')} tags 不能为空"
+        for tag in sc["tags"]:
+            assert isinstance(tag, str) and tag.strip(), f"tag 必须是非空字符串，实际: {tag!r}"
+    # 关键场景应有「核心路径」标签
+    core_path_scenarios = [sc for sc in body["scenarios"] if "核心路径" in sc.get("tags", [])]
+    assert len(core_path_scenarios) >= 3, "至少应有 3 个核心路径场景（S4/S5/S6）"

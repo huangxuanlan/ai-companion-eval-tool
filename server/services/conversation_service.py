@@ -343,6 +343,11 @@ class ConversationService:
         )
 
     @staticmethod
+    def build_history_from_results(results: list[dict]) -> list[dict]:
+        """公开接口：从已保存轮次恢复真实对话历史。"""
+        return ConversationService._build_history_from_results(results)
+
+    @staticmethod
     def _build_history_from_results(results: list[dict]) -> list[dict]:
         """从已保存轮次恢复真实对话历史。"""
         history = []
