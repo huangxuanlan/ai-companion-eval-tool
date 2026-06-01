@@ -22,6 +22,7 @@ from services.message_assembler import (
     SEPARATOR_MSG,
     STYLE_ISOLATION_MSG,
     MessageAssembler,
+    _normalize_mode,
 )
 from services.prompt_service import PromptService
 from services.model_adapter import ModelAdapter
@@ -42,6 +43,22 @@ from config import (
     SUMMARY_MODEL,
     extract_preset_module_defaults,
 )
+
+
+def _auto_switch_state(from_mode: str, to_mode: str) -> str:
+    """对话内热切换 mode 时自动生成的一次性切换接话指令。"""
+    if to_mode == "short":
+        return (
+            "【模式切换】用户刚把对话从长文模式切到短文模式。"
+            "请继承此前剧情事实、关系进展与情感状态，但改用短文风格继续："
+            "单段自然口语聊天气泡，40-60字，不要第三人称旁白、长段落或加粗对白格式。"
+        )
+    return (
+        "【模式切换】用户刚把对话从短文模式切到长文模式。"
+        "请继承此前剧情事实、关系进展与情感状态，改用长文沉浸式叙事继续："
+        "300-500字，旁白用（）包裹，对白为纯文本，结尾保留回话钩子。"
+    )
+
 
 SUMMARY_INJECT_TEMPLATE = """=== 之前剧情摘要 ===
 - 场景：{scene_description}
@@ -615,6 +632,7 @@ class ConversationService:
         temperature: float | None = None,
         top_p: float | None = None,
         switch_state: str = "",
+        mode: str = "",
     ) -> dict:
         return conversation_generation.execute_single_turn(
             self,
@@ -633,6 +651,7 @@ class ConversationService:
             temperature=temperature,
             top_p=top_p,
             switch_state=switch_state,
+            mode=mode,
         )
 
     @staticmethod
@@ -660,6 +679,7 @@ class ConversationService:
         temperature: float | None = None,
         top_p: float | None = None,
         switch_state: str = "",
+        mode: str = "",
     ) -> dict:
         for attempt, delay_s in enumerate((0.0, *TURN_TRANSIENT_RETRY_DELAYS_S), start=1):
             if delay_s > 0:
@@ -682,6 +702,7 @@ class ConversationService:
                     temperature,
                     top_p,
                     switch_state,
+                    mode,
                 )
             except Exception as exc:
                 is_last_attempt = attempt > len(TURN_TRANSIENT_RETRY_DELAYS_S)
@@ -709,6 +730,7 @@ class ConversationService:
         thinking_effort: str = "disabled",
         temperature: float | None = None,
         top_p: float | None = None,
+        mode: str = "",
     ) -> dict:
         """按当前会话配置生成一轮交互式回复，并落库保存真实消息栈。"""
         config = conversation.get("config", {})
@@ -754,6 +776,19 @@ class ConversationService:
             else ""
         )
 
+        # 对话内 mode 热切换：续聊传入 mode 与当前活跃 mode 不同则切换，并自动注入一次性 switch_state
+        conversation_mode = str(conversation.get("mode", "long") or "long").strip().lower()
+        prev_active_mode = (
+            str(runtime.get("active_mode", "") or "").strip().lower() or conversation_mode
+        )
+        requested_mode = _normalize_mode(mode)
+        active_mode = requested_mode or prev_active_mode
+        is_mode_switch = bool(requested_mode) and active_mode != prev_active_mode
+        if is_mode_switch:
+            runtime["active_mode"] = active_mode
+            if not active_switch_state:
+                active_switch_state = _auto_switch_state(prev_active_mode, active_mode)
+
         self.update_conversation_status(conv_id, "running")
         turn_data = self._execute_single_turn(
             config=config,
@@ -771,10 +806,11 @@ class ConversationService:
             temperature=temperature,
             top_p=top_p,
             switch_state=active_switch_state,
+            mode=active_mode,
         )
-        turn_data["mode"] = conversation.get("mode", "long")
+        turn_data["mode"] = active_mode
         self.insert_turn_result(conv_id, turn_data)
-        if active_switch_state:
+        if active_switch_state or is_mode_switch:
             runtime["switch_state"] = ""
             runtime["switch_state_status"] = "consumed"
             runtime["switch_state_consumed_turn"] = turn_num
@@ -823,6 +859,7 @@ class ConversationService:
         injection_depth: int | str = DEFAULT_INJECTION_DEPTH,
         model_id: str = "",
         history_source_mode: str = "",
+        mode: str = "",
     ) -> list:
         """兼容旧调用入口，实际拼接逻辑委托给 MessageAssembler。"""
         return self.assembler.build_messages(
@@ -841,6 +878,7 @@ class ConversationService:
             injection_policy=self._resolve_injection_policy(),
             model_id=model_id,
             history_source_mode=history_source_mode,
+            mode=mode,
         )
 
     def generate_summary(

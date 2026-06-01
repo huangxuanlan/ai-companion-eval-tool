@@ -162,6 +162,9 @@ python -c "import services.local_openai_provider as svc; \
 
 ### 4.2 Stage 2.2 UI 层 HTTP 探测 — ⚠️ 测试方法学错误 + 虚假声明已纠正（2026-05-28 复审）
 
+> **⏩ 2026-05-29 Phase 6 进展（本节为历史快照，已被推翻）**：下述 0% 实施结论仅对 cd7f186 时间点成立。此后 F4 前端融合已完整实施并接入 `index.html`，Playwright E2E 真验证 11/11 PASS（见 §10 D11 行、§13.3）。本节保留作为「文件 200 ≠ 接入」方法学教训的历史证据，不再代表当前状态。
+>
+
 > **2026-05-28 11:50 复审结论**：本节原标记 13/13 PASS 是测试方法学错误。实际 v6.0 cd7f186 提交**未动 `index.html`**，5 个新增前端文件 100% untracked，从未被静态 HTML 引用，F4 前端融合实际是 0% 实施。原"✅"基于「文件可通过 HTTP 200 访问」误判为「前端已接入」。
 >
 > **铁证**：
@@ -244,7 +247,7 @@ python -c "import services.local_openai_provider as svc; \
 | ADR-004 | 模型矩阵（pro/flash/lite/v4） | DEFAULT_PRIMARY_MODEL_SHORTFORM = deepseek-v4-flash | 🟢 一致 |
 | ADR-005 | 共享 library | 4 个 lib 全部抽取 + sys.modules trick | 🟢 完全一致（D2） |
 | ADR-006 | 桥接体验 | 9 端点（含新增 scenarios） | 🟢 增强（D3） |
-| ADR-007 | 前端 mode 切换 | **0% 实施** — index.html 未改 + 5 个新文件 untracked + DOM 缺失 | � **未实施**（D5/D11，2026-05-28 复审纠正） |
+| ADR-007 | 前端 mode 切换 | **100% 实施** — index.html 三模式 Tab + page-shortform/page-bridge 容器 + 5 文件已接入 | 🟢 **已实施**（Phase 6 E2E 11/11 PASS @ 2026-05-29） |
 
 #### 4.4.2 桥接 API v0.1 端点对照
 
@@ -310,10 +313,8 @@ python -c "import services.local_openai_provider as svc; \
 | 项 | 描述 | 严重性 | 建议 |
 |---|------|------|------|
 | Stage 2.3 真 LLM 测试未跑 | 涉及 API 费用，等用户确认 | 🟡 中 | 用户确认后冒烟级 1 次/方向 |
-| Playwright 浏览器交互层未执行 | HTTP 探测能覆盖 80%+，剩余靠手测 | 🟢 低 | 可选，v6.1 加入 CI |
 | scoring router 单文件 2000+ 行 | 长短桥共用 30+ 端点 | 🟡 中 | v6.1 按 mode 拆分 |
 | 短文前端规范 v1.8 §附录 B 部分采纳 | Reset 按钮 / 历史栈视图未实施 | 🟢 低 | PM 决策是否回写 PRD |
-| **F4 前端融合整体未接入**（D11 复审发现） | index.html 未改 + 5 文件 untracked + DOM 缺失 | 🔴 **严重** | **顺延 v6.1 全新实施 + Playwright E2E 真验证**；v6.0 GA 仅声明后端融合 |
 
 ## 7. Top 优秀测试
 
@@ -324,7 +325,7 @@ python -c "import services.local_openai_provider as svc; \
 ## 8. Top 待改进测试
 
 - `tests/unit/test_local_openai_provider.py` — 因 sys.modules alias trick 修复（Stage 0.2），现 6/6 PASS，但 monkeypatch 模式仍依赖 lib 路径稳定，需在 lib 重构时同步更新
-- 缺少 Playwright E2E 浏览器测试（v6.1 计划补）
+- ~~缺少 Playwright E2E 浏览器测试~~ → ✅ Phase 6 已补 `_e2e_d11_verify.py`（11/11 PASS @ 2026-05-29，连真实 server + 捕获真实请求）
 
 ## 9. 维度洞察
 
@@ -333,9 +334,9 @@ python -c "import services.local_openai_provider as svc; \
 | Lib 抽取一致性 | 4/4 (100%) | sys.modules alias trick 是关键，让 9 个 services shim 模式统一 |
 | Bridge 端点完整性 | 11/11 (100%) | F3 补齐后达 PRD §1.0 完全覆盖 |
 | 长短桥消息拼接 | 79/79 (100%) | v5.1 回归测试体系覆盖三模式所有路径 |
-| 前端 mode 切换 | **0/7 (0%)**（2026-05-28 复审纠正） | 原 13/13 PASS 是测试方法学错误（把「文件 HTTP 200」误等于「前端已接入」），实际 index.html 0 处引用 |
+| 前端 mode 切换 | **11/11 (100%)**（Phase 6 E2E @ 2026-05-29） | A 组切换 4 + B 组短文 3 + C 组桥接 3 + D 组 Fetch 拦截 1 全 PASS；D1 真实捕获 `?mode=short` 注入（非「文件 200」误判） |
 | MECE 场景覆盖 | 10/14 (71% 直接 + 29% 合并/跳过) | S1-S14 中 4 项无需独立测，符合 v5.9 设计 |
-| PRD ↔ 实施一致性 | **后端 13/13 (100%) + 前端 0/1 (0%)** | ADR-001~006 后端全合规；ADR-007 前端 0% 实施，顺延 v6.1（D11 复审）|
+| PRD ↔ 实施一致性 | **后端 13/13 (100%) + 前端 1/1 (100%)** | ADR-001~006 后端全合规；ADR-007 前端 Phase 6 完整实施，E2E 11/11 PASS（D11 闭环）|
 
 ## 10. 后续动作
 
@@ -344,10 +345,10 @@ python -c "import services.local_openai_provider as svc; \
 | Stage 2.3 真 LLM 冒烟 | P0 | ✅ 完成 | S5+S6 baseline 全 PASS（Run 2 @ 04:10） |
 | 端到端 server 启动冒烟 | P0 | ✅ 完成 | 6/6 PASS（含 scenarios 反探 + DB hardlink 验证） |
 | D7 scenarios 加 tags 字段 | P2 | ✅ 完成 | 10 场景全部加 tags + 1 新测试，全量回归 360 PASS （含 1 known flaky） |
-| D5 PM 审批短文前端规范偏差 | ~~P1~~ | 🔴 **重新定性为 D11**（2026-05-28 复审）| 原判「短文独立化」是误判，实际 F4 前端 0% 实施 |
-| **D11 F4 前端融合 0% 实施 — 顺延 v6.1** | P0 | ⏳ v6.1 | 含顶部 3 Tab / page-bridge / 长文 page mode 适配 / Playwright E2E（5-7 人天）|
+| D5 PM 审批短文前端规范偏差 | ~~P1~~ | ✅ 闭环（重定性为 D11） | D11 Phase 6 已完整实施前端融合，D5 一并关闭 |
+| **D11 F4 前端融合 — Phase 6 完整实施** | P0 | ✅ **完成** | 顶部 3 Tab + page-shortform/page-bridge + 长文 page mode 适配 + mode_controller/shortform_module/bridge_panel 接入；Playwright E2E 11/11 PASS @ 2026-05-29 |
 | D6 scoring router 拆分 ROI 评估 | P2 | ⏳ 待评估 | v6.1 sprint planning |
-| Playwright E2E CI 集成 | P2 | ⏳ 必须集成 | v6.1（避免再次出现「文件 200 = 接入」误判）|
+| Playwright E2E CI 集成 | P2 | ⏳ 必须集成 | `_e2e_d11_verify.py` 已建（连真实 server，验证 `?mode=short` 注入），v6.1 接入 CI 防回归 |
 
 ### Known Flaky Tests（与 v6.0 无关）
 
@@ -373,6 +374,7 @@ python -c "import services.local_openai_provider as svc; \
 | Lib 包 | 0 | 4 | 4 | 4 | format_lint/model_adapter/prompt_template/prompt_scoring |
 | Bridge 端点 | 10 | 11 | 11 | 11 | +scenarios |
 | Scenarios 场景 | 0（未暴露） | 10 | 10 | 10 | tags 补齐 PRD §2.6 |
+| 前端接入率 | 0% | 0% | 0% | 0% → **100%**（Phase 6） | 三模式 Tab + 双容器 + 5 文件接入，E2E 11/11 PASS |
 
 ## 12. 资产索引
 
@@ -409,4 +411,32 @@ python -c "import services.local_openai_provider as svc; \
   - 用户看到的仍然是纯长文模式的 v5.x 经典 UI，实锤前端融合为 0% 实施状态。
 - **截图留证**：
   ![D11 UI 冒烟截图](file:///E:/%E6%8F%90%E6%95%88%E5%B7%A5%E5%85%B7/%E9%95%BF%E6%96%87%E6%A8%A1%E5%BC%8F%E7%94%9F%E6%88%90/docs/d11_ui_smoke.png)
+
+> **⏩ §13.2 为 cd7f186 时间点历史快照，已被 §13.3 推翻。**
+
+### 13.3 Phase 6 前端融合完整实施 + Playwright E2E 真验证（2026-05-29）
+
+F4 前端融合在 Phase 6 完整实施并接入 `index.html`：顶部 3 模式 Tab（`data-mode` + `setMode()`）、`#page-shortform`（5 子 Tab）、`#page-bridge`（三栏 + 新建会话模态框），以及 `mode_controller.js` / `shortform_module.js` / `bridge_panel.js` / `shortform.css` / `bridge.css` 全部接入。
+
+**验证方式**：`_e2e_d11_verify.py` 用 Playwright（headless Chromium）连接**真实运行的 server**（`http://localhost:8000`），调真实 API、检查计算样式与捕获实际网络请求，规避「文件 HTTP 200 = 接入」误判。
+
+**E2E 矩阵 11/11 PASS**：
+
+| 组 | 用例 | 关键证据 |
+|---|------|---------|
+| A1 | 默认长文模式 | `currentMode=longform`，`#page-chat` 可见 |
+| A2 | 切换到短文 | hash `#/shortform`，`#page-shortform` 可见，`switchShortformTab` 已加载 |
+| A3 | 切换到桥接 | hash `#/bridge`，`#page-bridge` 可见，`openNewBridgeSessionModal` 已加载 |
+| A4 | 刷新保持状态 | `/#/shortform` 刷新后仍停留短文页 |
+| B1 | 短文 5 子 Tab | `tabCount=5`，默认「用例库」active |
+| B2 | 用例库表格渲染 | 真实调 `/api/configs?mode=short`，表格 2 行 |
+| B3 | 运行台 | Prompt A/B 下拉 + 生成模型选择均可见 |
+| C1 | 会话选择器 | 真实调 `/api/bridge/sessions`，下拉有选项 |
+| C2 | 新建会话模态框 | 点击后 `#modal-new-bridge` 弹出 |
+| C3 | 源历史加载 | `#bridge-source-history` 渲染空状态/气泡 |
+| D1 | Fetch 注入 mode | **真实捕获** `GET /api/prompts?mode=short`（拦截代理生效铁证） |
+
+- **console/page 错误**：0（已排除 favicon 噪音）
+- **结论**：ADR-007 前端 mode 切换由 0% → **100% 实施**，方法学上以「真实浏览器 + 真实 server + 捕获真实请求」彻底闭环 D11。
+
 

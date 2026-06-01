@@ -151,6 +151,7 @@ def execute_single_turn(
     temperature: float | None = None,
     top_p: float | None = None,
     switch_state: str = "",
+    mode: str = "",
 ) -> dict:
     config = config or {}
     runtime = dict(config.get("runtime", {}) or {})
@@ -221,6 +222,7 @@ def execute_single_turn(
         turn_num=turn_num,
         injection_depth=runtime_bundle.injection_depth,
         model_id=model_id,
+        mode=mode,
     )
 
     total_tokens = service.trimmer.count_messages_tokens(messages)

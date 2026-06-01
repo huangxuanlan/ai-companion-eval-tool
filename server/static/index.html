@@ -10,6 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="vendor/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="css/main.css?v=93">
+  <link rel="stylesheet" href="css/shortform.css?v=1">
+  <link rel="stylesheet" href="css/bridge.css?v=1">
+
 
 </head>
 
@@ -60,7 +63,13 @@
   <!-- 中间工作区 -->
   <main class="main-workspace">
     <header class="workspace-header">
-      <div class="header-left">
+      <div class="header-left" style="display:flex;align-items:center">
+        <!-- 模式切换器 -->
+        <div class="mode-tab-switcher" id="mode-tab-switcher">
+          <button class="mode-tab-btn active" data-mode="longform" onclick="setMode('longform')">长文模式</button>
+          <button class="mode-tab-btn" data-mode="shortform" onclick="setMode('shortform')">短文模式</button>
+          <button class="mode-tab-btn" data-mode="bridge" onclick="setMode('bridge')">双模式桥接</button>
+        </div>
         <div id="header-model-shell" class="header-model-shell" title="点击选择全局主模型">
           <div id="header-model-picker"></div>
           <button class="btn btn-secondary header-model-settings-btn" id="btn-header-model-settings" type="button"
@@ -1356,6 +1365,476 @@
           style="display:none;width:100%;min-height:400px;max-height:600px;font-size:12px;padding:16px;background:var(--bg-hover);border:1px solid var(--border-light);border-radius:8px;line-height:1.6;font-family:monospace;resize:vertical"></textarea>
       </div>
     </section>
+
+    <!-- P6: 短文验证页面 -->
+    <section id="page-shortform" class="page" style="flex:1;display:none;flex-direction:column;min-height:0">
+      <!-- 短文子导航 Tab -->
+      <div class="sf-nav-tabs">
+        <button class="sf-tab-btn active" data-tab="case" onclick="switchShortformTab('case')">🗂️ 用例库</button>
+        <button class="sf-tab-btn" data-tab="run" onclick="switchShortformTab('run')">🚀 运行台</button>
+        <button class="sf-tab-btn" data-tab="monitor" onclick="switchShortformTab('monitor')">📊 任务监控</button>
+        <button class="sf-tab-btn" data-tab="report" onclick="switchShortformTab('report')">📋 对比报告</button>
+        <button class="sf-tab-btn" data-tab="benchmark" onclick="switchShortformTab('benchmark')">🏁 基准对比</button>
+      </div>
+
+      <!-- 短文子页面容器 -->
+      <div class="sf-subpage-container" style="flex:1;padding:0 24px 24px;overflow-y:auto;min-height:0">
+        <!-- 1. 用例库 -->
+        <div id="sf-subpage-case" class="sf-subpage active">
+          <div class="sf-card" style="margin-bottom:16px;padding:20px">
+            <div style="font-weight:600;font-size:16px;margin-bottom:12px">📥 导入日志</div>
+            <div class="sf-drag-zone" id="sf-case-drag-zone" style="border:2px dashed var(--border-light);border-radius:8px;padding:32px;text-align:center;cursor:pointer;background:var(--bg-hover)">
+              <div style="font-size:32px;margin-bottom:8px">📂</div>
+              <p style="margin:0;font-size:13px;color:var(--text-secondary)">拖拽 .md/.json/.xlsx/.jsonl 日志文件到此处，或点击浏览上传</p>
+              <input type="file" id="sf-case-file-input" style="display:none" multiple>
+            </div>
+          </div>
+          <div class="sf-card" style="padding:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <div style="display:flex;gap:12px;align-items:center">
+                <span style="font-weight:600;font-size:16px">用例列表</span>
+                <select id="sf-filter-role" class="form-select" onchange="loadShortformCases()" style="max-width:150px"><option value="">所有角色</option></select>
+                <select id="sf-filter-personality" class="form-select" onchange="loadShortformCases()" style="max-width:150px"><option value="">所有半身/人设</option></select>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-secondary" onclick="saveAsTestSet()">+ 保存选中为测试集</button>
+                <button class="btn btn-secondary" onclick="exportSelectedCases()">Export Excel</button>
+              </div>
+            </div>
+            <table class="sf-table" id="sf-cases-table" style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="width:40px;text-align:center"><input type="checkbox" id="sf-cases-select-all" onchange="toggleSelectAllCases(this)"></th>
+                  <th>用例 ID/名称</th>
+                  <th>角色名</th>
+                  <th>人设类型</th>
+                  <th>历史轮数</th>
+                  <th>更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-secondary)">暂无数据，请先导入日志</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. 运行台 -->
+        <div id="sf-subpage-run" class="sf-subpage">
+          <div class="sf-run-layout" style="display:flex;gap:20px">
+            <!-- 运行参数配置 -->
+            <div style="flex:1.5;display:flex;flex-direction:column;gap:16px">
+              <div class="sf-card" style="padding:20px">
+                <div style="font-weight:600;font-size:15px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:8px">1. 提示词 A/B 版本配置</div>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">Prompt A (基准版本)</label>
+                    <select id="sf-run-prompt-a" class="form-select" style="width:100%"><option value="">-- 选择系统提示词 --</option></select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">Prompt B (对比版本)</label>
+                    <select id="sf-run-prompt-b" class="form-select" style="width:100%"><option value="">-- 选择系统提示词 --</option></select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sf-card" style="padding:20px">
+                <div style="font-weight:600;font-size:15px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:8px">2. 模型与运行配置</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">生成模型 (默认 DeepSeek V4 Flash)</label>
+                    <select id="sf-run-model" class="form-select" style="width:100%"></select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">打分模型 (默认 Qwen 3.7 Max)</label>
+                    <select id="sf-run-score-model" class="form-select" style="width:100%"></select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">缓存策略</label>
+                    <select id="sf-run-cache-policy" class="form-select" style="width:100%">
+                      <option value="isolate">隔离缓存</option>
+                      <option value="disable">禁用缓存</option>
+                      <option value="reuse">复用缓存 (⚠️不推荐在对比中使用)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">每样本重复次数</label>
+                    <input type="number" id="sf-run-repeats" class="form-input" value="1" min="1" max="5">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 校验参数配置 -->
+            <div style="flex:1;display:flex;flex-direction:column;gap:16px">
+              <div class="sf-card" style="padding:20px">
+                <div style="font-weight:600;font-size:15px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:8px">3. 短文确定性校验规则</div>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div style="display:flex;gap:12px">
+                    <div style="flex:1">
+                      <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">最小字数</label>
+                      <input type="number" id="sf-check-min-words" class="form-input" value="30">
+                    </div>
+                    <div style="flex:1">
+                      <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">最大字数</label>
+                      <input type="number" id="sf-check-max-words" class="form-input" value="90">
+                    </div>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">叙事人称模式</label>
+                    <select id="sf-check-person" class="form-select" style="width:100%">
+                      <option value="first">旁白强制第一人称(我)</option>
+                      <option value="third">旁白强制第三人称(他/她)</option>
+                      <option value="any">不限人称</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">Emoji 表情限制</label>
+                    <select id="sf-check-emoji" class="form-select" style="width:100%">
+                      <option value="block">禁止使用 Emoji/颜文字</option>
+                      <option value="allow">允许使用</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">自定义全局禁词 (逗号分隔)</label>
+                    <input type="text" id="sf-check-forbidden-words" class="form-input" placeholder="例如: 指尖, END, 系统提示">
+                  </div>
+                </div>
+                <button class="btn btn-primary" id="btn-start-sf-ab" onclick="startShortformABTest()" style="width:100%;margin-top:20px;padding:12px">🚀 开始 A/B 对比测试</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 任务监控 -->
+        <div id="sf-subpage-monitor" class="sf-subpage">
+          <div class="sf-card" style="padding:20px;margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <div>
+                <span style="font-weight:600;font-size:16px" id="sf-monitor-title">批量任务监控</span>
+                <span id="sf-monitor-status-badge" class="badge badge-secondary" style="margin-left:8px">闲置</span>
+              </div>
+              <div style="display:flex;gap:8px" id="sf-monitor-controls">
+                <button class="btn btn-secondary" onclick="pauseShortformRun()">⏸ 暂停</button>
+                <button class="btn btn-secondary" onclick="resumeShortformRun()">▶ 恢复</button>
+                <button class="btn btn-danger" onclick="cancelShortformRun()">⏹ 取消</button>
+                <button class="btn btn-secondary" id="btn-sf-retry-failed" onclick="retryFailedShortformRun()" style="display:none">🔄 仅重跑失败</button>
+              </div>
+            </div>
+            <!-- Progress bars -->
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                  <span>Prompt A 进度</span>
+                  <span id="sf-progress-a-text">0 / 0</span>
+                </div>
+                <div class="progress-bar-track" style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+                  <div id="sf-progress-a-fill" style="width:0%;height:100%;background:var(--primary-color)"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                  <span>Prompt B 进度</span>
+                  <span id="sf-progress-b-text">0 / 0</span>
+                </div>
+                <div class="progress-bar-track" style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+                  <div id="sf-progress-b-fill" style="width:0%;height:100%;background:#fb923c"></div>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:12px;font-size:12px;color:var(--text-secondary);display:flex;gap:24px">
+              <span>已耗时: <span id="sf-monitor-elapsed">0s</span></span>
+              <span>预计剩余: <span id="sf-monitor-eta">--</span></span>
+            </div>
+          </div>
+          <!-- Log stream -->
+          <div class="sf-card" style="padding:20px">
+            <div style="font-weight:600;font-size:15px;margin-bottom:12px">📋 实时日志流</div>
+            <div id="sf-monitor-log-stream" style="height:300px;overflow-y:auto;background:var(--bg-hover);padding:12px;border-radius:6px;font-family:monospace;font-size:12px;display:flex;flex-direction:column;gap:6px">
+              <div style="color:var(--text-tertiary)">无活动任务日志</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 对比报告 -->
+        <div id="sf-subpage-report" class="sf-subpage">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">A/B 对比报告</h3>
+            <button class="btn btn-secondary" onclick="exportShortformABReportExcel()">📥 导出 Excel 报告</button>
+          </div>
+          <!-- Radar and scores -->
+          <div style="display:flex;gap:20px;margin-bottom:20px">
+            <div class="sf-card" style="flex:1;padding:20px;display:flex;flex-direction:column;align-items:center">
+              <div style="font-weight:600;margin-bottom:12px">AI 评分维度雷达图</div>
+              <div style="width:250px;height:250px;position:relative">
+                <canvas id="sf-report-radar-canvas" width="250" height="250"></canvas>
+              </div>
+            </div>
+            <div class="sf-card" style="flex:1.5;padding:20px">
+              <div style="font-weight:600;margin-bottom:12px">维度得分详情</div>
+              <table class="sf-table" id="sf-report-dimensions-table" style="width:100%">
+                <thead>
+                  <tr>
+                    <th>评分维度</th>
+                    <th>A 均分</th>
+                    <th>B 均分</th>
+                    <th>差值</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Deterministic check failures -->
+          <div class="sf-card" style="padding:20px;margin-bottom:20px">
+            <div style="font-weight:600;font-size:15px;margin-bottom:12px;color:var(--text-danger)">🚨 确定性校验违规汇总</div>
+            <table class="sf-table" id="sf-report-violations-table" style="width:100%">
+              <thead>
+                <tr>
+                  <th>用例 ID</th>
+                  <th>版本</th>
+                  <th>字数</th>
+                  <th>人称</th>
+                  <th>禁词</th>
+                  <th>重复率</th>
+                  <th>违规片段定位</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Injected via JS -->
+              </tbody>
+            </table>
+          </div>
+          <!-- Cases detail list -->
+          <div class="sf-card" style="padding:20px">
+            <div style="font-weight:600;font-size:15px;margin-bottom:12px">🔍 逐样本对比视图</div>
+            <div id="sf-report-cases-detail" style="display:flex;flex-direction:column;gap:12px">
+              <!-- Detail toggles -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. 基准对比 -->
+        <div id="sf-subpage-benchmark" class="sf-subpage">
+          <div class="sf-run-layout" style="display:flex;gap:20px">
+            <!-- Left inputs -->
+            <div style="flex:1.2;display:flex;flex-direction:column;gap:16px">
+              <div class="sf-card" style="padding:20px">
+                <div style="font-weight:600;font-size:15px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:8px">1. 选择候选模型</div>
+                <div id="sf-bench-models-list" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <!-- model checkboxes injected dynamically -->
+                </div>
+              </div>
+              <div class="sf-card" style="padding:20px">
+                <div style="font-weight:600;font-size:15px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:8px">2. 运行环境配置</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">每用例轮次</label>
+                    <input type="number" id="sf-bench-turns" class="form-input" value="10">
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">重复次数</label>
+                    <input type="number" id="sf-bench-repeat" class="form-input" value="1">
+                  </div>
+                  <div>
+                    <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">最高并发数</label>
+                    <input type="number" id="sf-bench-concurrency" class="form-input" value="8">
+                  </div>
+                  <div>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;height:100%;margin-top:16px">
+                      <input type="checkbox" id="sf-bench-enable-scoring" onchange="toggleBenchScoringModelSelect(this)"> 启动打分 (耗时更长)
+                    </label>
+                  </div>
+                </div>
+                <div id="sf-bench-scoring-model-wrapper" style="display:none;margin-bottom:16px">
+                  <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">打分评估模型</label>
+                  <select id="sf-bench-scoring-model" class="form-select" style="width:100%"></select>
+                </div>
+                <!-- Memory info -->
+                <div id="sf-bench-sys-check" style="background:var(--bg-hover);padding:12px;border-radius:6px;font-size:12px;color:var(--text-secondary);margin-bottom:16px">
+                  💻 系统内存检测: <span id="sf-bench-sys-mem">检测中...</span>
+                </div>
+                <button class="btn btn-primary" onclick="startShortformBenchmark()" style="width:100%;padding:12px">🚀 开始多模型基准对比</button>
+              </div>
+            </div>
+            <!-- Right benchmark progress & report -->
+            <div style="flex:1.8;display:flex;flex-direction:column;gap:16px">
+              <div class="sf-card" id="sf-bench-progress-card" style="padding:20px;display:none">
+                <div style="font-weight:600;font-size:15px;margin-bottom:12px">⏳ 基准进度监控</div>
+                <div class="progress-bar-track" style="height:10px;background:var(--bg-hover);border-radius:5px;overflow:hidden;margin-bottom:12px">
+                  <div id="sf-bench-progress-fill" style="width:0%;height:100%;background:var(--primary-color)"></div>
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);display:flex;justify-content:space-between">
+                  <span id="sf-bench-progress-text">0 / 0 调用</span>
+                  <span id="sf-bench-eta-text">预计剩余 --</span>
+                </div>
+              </div>
+              <div class="sf-card" id="sf-bench-leaderboard-card" style="padding:20px;display:none">
+                <div style="font-weight:600;font-size:15px;margin-bottom:12px">🥇 实时耗时/失败率排行榜</div>
+                <table class="sf-table" id="sf-bench-leaderboard-table" style="width:100%">
+                  <thead>
+                    <tr>
+                      <th>排名</th>
+                      <th>模型名称</th>
+                      <th>平均耗时</th>
+                      <th>P50 耗时</th>
+                      <th>P95 耗时</th>
+                      <th>已跑轮次</th>
+                      <th>失败率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- P7: 双模式桥接页面 -->
+    <section id="page-bridge" class="page" style="flex:1;display:none;flex-direction:column;min-height:0">
+      <div class="bridge-workspace" style="display:flex;flex-direction:column;height:100%">
+        <!-- 1. 顶部控制 -->
+        <div class="bridge-zone-top" style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:var(--bg-surface);border-bottom:1px solid var(--border-light)">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-weight:600;font-size:15px">双模式桥接验证</span>
+            <select id="bridge-session-selector" onchange="loadBridgeSessionDetails()" class="form-select" style="max-width:300px;font-size:13px">
+              <option value="">-- 选择切换会话 --</option>
+            </select>
+            <button class="btn btn-secondary" onclick="openNewBridgeSessionModal()" style="padding:4px 12px">新建切换验证</button>
+          </div>
+          <div id="bridge-meta-stats" style="font-size:13px;color:var(--text-secondary)">
+            源会话: - | 模式: - → - | 目标模型: -
+          </div>
+        </div>
+
+        <!-- 2. 中部 -->
+        <div class="bridge-zone-middle" style="flex:1;display:flex;min-height:0">
+          <!-- 左栏：源对话 20 轮 -->
+          <div class="bridge-zone-left" style="width:30%;border-right:1px solid var(--border-light);display:flex;flex-direction:column;min-height:0;background:var(--bg-surface)">
+            <div class="zone-title" style="padding:12px;font-weight:600;border-bottom:1px solid var(--border-light)">源会话历史 (最近 20 轮)</div>
+            <div id="bridge-source-history" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div class="empty-state" style="margin-top:40px">请先选择或新建切换会话</div>
+            </div>
+          </div>
+
+          <!-- 中栏：切换摘要与过渡 -->
+          <div class="bridge-zone-center" style="width:30%;border-right:1px solid var(--border-light);display:flex;flex-direction:column;min-height:0;background:var(--bg-surface)">
+            <div class="zone-title" style="padding:12px;font-weight:600;border-bottom:1px solid var(--border-light)">切换摘要 (互动要点)</div>
+            <div style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+              <!-- Summary Status Card -->
+              <div id="bridge-summary-status-card" class="bridge-card" style="padding:16px;border-radius:8px;border:1px solid var(--border-light);background:var(--bg-surface)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                  <span style="font-weight:600">摘要生成状态</span>
+                  <span id="bridge-summary-status-badge" class="badge badge-secondary">等待中</span>
+                </div>
+                <div class="progress-bar-container" style="display:none" id="bridge-summary-progress-wrapper">
+                  <div class="progress-bar-track" style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden">
+                    <div id="bridge-summary-progress-fill" style="width:0%;height:100%;background:var(--primary-color)"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-tertiary);margin-top:6px">
+                    <span>已耗时 <span id="bridge-summary-elapsed">0.0</span>s</span>
+                    <span>阈值 2.5s</span>
+                  </div>
+                </div>
+                <div id="bridge-summary-fallback-tip" style="display:none;font-size:12px;color:var(--text-danger);margin-top:8px">
+                  ⚠️ 超时/失败：已触发 L1 三明治降级拼接
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <label style="font-weight:600;font-size:12px;color:var(--text-secondary)">生成的摘要内容</label>
+                <textarea id="bridge-summary-text" readonly class="form-textarea" style="height:200px;font-family:monospace;font-size:12px;background:var(--bg-hover)"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右栏：首轮输出与打分 -->
+          <div class="bridge-zone-right" style="width:40%;display:flex;flex-direction:column;min-height:0;background:var(--bg-surface)">
+            <div class="zone-title" style="padding:12px;font-weight:600;border-bottom:1px solid var(--border-light)">切换后首轮输出 &amp; 打分</div>
+            <div style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+              <div class="bridge-card" style="padding:16px;border-radius:8px;border:1px solid var(--border-light)">
+                <div style="font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                  <span>AI 首轮回复</span>
+                  <span id="bridge-run-strategy-badge" class="badge badge-primary" style="font-size:11px">L0 正常</span>
+                </div>
+                <div id="bridge-ai-output" style="font-size:13px;line-height:1.6;white-space:pre-wrap;min-height:80px;background:var(--bg-hover);padding:12px;border-radius:6px"></div>
+                <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
+                  <button class="btn btn-secondary" onclick="triggerBridgeManualWakeup()" id="btn-bridge-wakeup">🔄 醒一醒 (重写)</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap">
+                <!-- Scores list -->
+                <div style="flex:1;display:flex;flex-direction:column;gap:8px" id="bridge-scores-list"></div>
+                <!-- Mini radar canvas -->
+                <div style="width:120px;height:120px;position:relative" id="bridge-radar-container">
+                  <canvas id="bridge-radar-canvas" width="120" height="120"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 底部测试集触发 -->
+        <div class="bridge-zone-bottom" style="padding:16px 24px;background:var(--bg-surface);border-top:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:13px;font-weight:600">批量运行测试:</span>
+            <button class="btn btn-primary" onclick="triggerBridgeBatchTest()">🚀 启动当前场景的批量验证</button>
+            <span id="bridge-batch-status" style="font-size:12px;color:var(--text-secondary)">就绪</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary" onclick="viewBridgeBatchReport()">查看批量结果报告</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 模态框：新建切换会话 -->
+    <div class="modal-backdrop" id="modal-new-bridge" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center">
+      <div class="modal-content" style="background:var(--bg-surface);padding:24px;border-radius:12px;width:450px;max-width:90%">
+        <h3 style="margin-top:0;margin-bottom:16px">新建切换验证会话</h3>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">切换方向</label>
+            <select id="bridge-new-direction" class="form-select" style="width:100%">
+              <option value="s2l">短文模式 → 长文模式 (short to long)</option>
+              <option value="l2s">长文模式 → 短文模式 (long to short)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">源对话历史</label>
+            <select id="bridge-new-source-conv" class="form-select" style="width:100%"><option value="">正在加载...</option></select>
+          </div>
+          <div>
+            <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">目标大模型 (可选)</label>
+            <select id="bridge-new-model" class="form-select" style="width:100%"></select>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+          <button class="btn btn-secondary" onclick="closeNewBridgeSessionModal()">取消</button>
+          <button class="btn btn-primary" onclick="submitCreateBridgeSession()">确定创建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模态框：保存用例为测试集 -->
+    <div class="modal-backdrop" id="modal-save-testset" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center">
+      <div class="modal-content" style="background:var(--bg-surface);padding:24px;border-radius:12px;width:400px;max-width:90%">
+        <h3 style="margin-top:0;margin-bottom:16px">保存测试集</h3>
+        <div>
+          <label style="font-weight:600;font-size:12px;margin-bottom:4px;display:block">测试集名称</label>
+          <input type="text" id="sf-new-testset-name" class="form-input" placeholder="例如: 黄金用例集_v1.0">
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+          <button class="btn btn-secondary" onclick="closeSaveTestSetModal()">取消</button>
+          <button class="btn btn-primary" onclick="submitSaveTestSet()">保存</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- 模态框：人工详细打分 -->
@@ -2036,6 +2515,7 @@
       <div id="history-summary-task-fill" class="batch-rescore-float-fill" style="width:0%"></div>
     </div>
   </div>
+  <script src="js/mode_controller.js?v=1" defer></script>
   <script src="js/legacy_bundle.js?v=106" defer></script>
 </body>
 

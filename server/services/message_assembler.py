@@ -172,6 +172,16 @@ def _target_mode_for_model(model_id: str) -> str:
     return "long"
 
 
+def _normalize_mode(mode: str) -> str:
+    """规范化显式 mode 为 'short'/'long'，无法识别返回空串（交由 model_id 推断兜底）。"""
+    value = str(mode or "").strip().lower()
+    if value in {"short", "shortform", "short_form", "短文", "短文模式"}:
+        return "short"
+    if value in {"long", "longform", "long_form", "长文", "长文模式"}:
+        return "long"
+    return ""
+
+
 def _v52_system_core_for_mode(target_mode: str) -> str:
     if target_mode == "short":
         return (
@@ -277,9 +287,10 @@ class MessageAssembler:
         personality: str = "",
         model_id: str = "",
         history_source_mode: str = "",
+        mode: str = "",
     ) -> list[dict]:
         """实验版 v5.2 消息合同：单 system + assistant 动态摘要 + 原 role 历史。"""
-        target_mode = _target_mode_for_model(model_id)
+        target_mode = _normalize_mode(mode) or _target_mode_for_model(model_id)
         full_system_parts = [str(rendered_system or "").strip()]
         if system_after:
             full_system_parts.append(str(system_after).strip())
@@ -361,6 +372,7 @@ class MessageAssembler:
         injection_policy: tuple[int, int] = DEFAULT_INJECTION_POLICY,
         model_id: str = "",
         history_source_mode: str = "",
+        mode: str = "",
     ) -> list[dict]:
         """
         按白皮书 v1.7 §4.1 消息架构组装完整 messages 数组。
@@ -408,6 +420,7 @@ class MessageAssembler:
                 personality=personality,
                 model_id=model_id,
                 history_source_mode=history_source_mode,
+                mode=mode,
             )
 
         from services.model_adapter import ModelAdapter

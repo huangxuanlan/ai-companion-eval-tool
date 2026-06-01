@@ -1,0 +1,158 @@
+/**
+ * 双模式桥接模式专属样式表
+ */
+
+/* 5区核心网格/弹性盒布局 */
+.bridge-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-body, #f8fafc);
+  overflow: hidden;
+}
+
+.bridge-zone-top {
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  z-index: 10;
+}
+
+.bridge-zone-middle {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bridge-zone-left,
+.bridge-zone-center,
+.bridge-zone-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bridge-zone-left {
+  border-right: 1px solid var(--border-light, #e2e8f0);
+}
+
+.bridge-zone-center {
+  border-right: 1px solid var(--border-light, #e2e8f0);
+}
+
+.bridge-zone-right {
+  background: var(--bg-surface, #ffffff);
+}
+
+.bridge-zone-bottom {
+  flex-shrink: 0;
+  z-index: 10;
+  box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.03);
+}
+
+/* 区域标题样式 */
+.zone-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #64748b);
+  background: var(--bg-hover, #f1f5f9);
+}
+
+/* 空白/提示卡片样式 */
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-tertiary, #94a3b8);
+  font-size: 13px;
+}
+
+/* 桥接卡片 */
+.bridge-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-light, #e2e8f0);
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* 气泡聊天区布局（源历史） */
+.bridge-chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  max-width: 85%;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bridge-chat-bubble.user {
+  background: rgba(31, 111, 235, 0.08);
+  color: var(--text-primary, #0f172a);
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+}
+
+.bridge-chat-bubble.assistant {
+  background: var(--bg-hover, #f1f5f9);
+  color: var(--text-primary, #0f172a);
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+
+/* 模式变更标签 */
+.bridge-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bridge-mode-badge.long {
+  background: rgba(31, 111, 235, 0.1);
+  color: var(--primary-color, #1f6feb);
+}
+
+.bridge-mode-badge.short {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.bridge-mode-badge.bridge {
+  background: rgba(234, 179, 8, 0.1);
+  color: #ca8a04;
+}
+
+/* 打分列表单行 */
+.bridge-score-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--bg-hover, #f8fafc);
+  border-radius: 6px;
+  border: 1px solid var(--border-light, #e2e8f0);
+}
+
+.bridge-score-label {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.bridge-score-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+/* 雷达图画布尺寸限制 */
+#bridge-radar-canvas {
+  width: 120px;
+  height: 120px;
+}

@@ -478,6 +478,7 @@ def _invoke_interactive_turn_generation(
     thinking_effort: str,
     temperature: float | None,
     top_p: float | None,
+    mode: str = "",
 ):
     """按 service 实际签名做兼容调用，避免 mock/旧实现被新增参数打爆。"""
     method = service.generate_interactive_turn
@@ -492,6 +493,7 @@ def _invoke_interactive_turn_generation(
         "thinking_effort": thinking_effort,
         "temperature": temperature,
         "top_p": top_p,
+        "mode": mode,
     }
     for name, value in optional_args.items():
         if name in supported:
@@ -1028,6 +1030,7 @@ async def generate_interactive_turn(conv_id: str, data: InteractiveGenerateReque
             thinking_effort=data.thinking_effort,
             temperature=data.temperature,
             top_p=data.top_p,
+            mode=data.mode or "",
         )
     except Exception as exc:
         _update_conversation_status(conv_id, "failed")

@@ -223,6 +223,7 @@ class InteractiveGenerateRequest(BaseModel):
 
     user_input: str = ""
     model_id: str = ""
+    mode: Optional[str] = None
     web_search: bool = False
     thinking_enabled: Optional[bool] = None
     thinking_effort: str = ""
