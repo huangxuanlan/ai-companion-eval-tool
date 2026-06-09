@@ -45,3 +45,9 @@ Thumbs.db
 
 # === Pre-pull 备份目录（v6.0 调试物证，不入库）===
 backups/
+
+# === 视觉回归派生产物（基线 __screenshots__ 需入库，其余忽略）===
+tests/visual/__current__/
+tests/visual/__diff__/
+tests/visual/__screenshots__/responsive/
+tests/visual/__screenshots__/*.diff.png

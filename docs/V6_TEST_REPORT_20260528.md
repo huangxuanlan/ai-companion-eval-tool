@@ -326,6 +326,7 @@ python -c "import services.local_openai_provider as svc; \
 
 - `tests/unit/test_local_openai_provider.py` — 因 sys.modules alias trick 修复（Stage 0.2），现 6/6 PASS，但 monkeypatch 模式仍依赖 lib 路径稳定，需在 lib 重构时同步更新
 - ~~缺少 Playwright E2E 浏览器测试~~ → ✅ Phase 6 已补 `_e2e_d11_verify.py`（11/11 PASS @ 2026-05-29，连真实 server + 捕获真实请求）
+- ~~缺少视觉回归基线，CSS 改崩无法自动发现~~ → ✅ 2026-06-02 已补 `tests/visual/test_visual_regression.py`（6 张基线 PASS + 像素级 diff）+ 响应式溢出检查（检出长文 768px 真实缺陷，详见 §14）
 
 ## 9. 维度洞察
 
@@ -438,5 +439,105 @@ F4 前端融合在 Phase 6 完整实施并接入 `index.html`：顶部 3 模式 
 
 - **console/page 错误**：0（已排除 favicon 噪音）
 - **结论**：ADR-007 前端 mode 切换由 0% → **100% 实施**，方法学上以「真实浏览器 + 真实 server + 捕获真实请求」彻底闭环 D11。
+
+---
+
+## 14. 前端 UI 测试体系建设（2026-06-02）
+
+### 14.1 背景与分层
+
+D11 闭环只验证了「元素存在 + 计算样式 + 请求注入」，无法回答「Canvas 真画出来了吗 / 表格真填了吗 / 模态框真能关吗 / CSS 改崩了能否自动发现」。为此按 ROI 递增建设四层 UI 测试，全部沿用现有裸 `sync_playwright` 风格，连隔离 server（8001 + 临时 DB），不引入 `pytest-playwright`、不碰生产库。
+
+| 层级 | 关注点 | 资产 | 状态 |
+|------|--------|------|------|
+| 第一层 | 渲染正确性（非空壳/非报错） | `_e2e_d11_verify.py` E 组扩展 | ✅ |
+| 第二层 | 真实交互流程端到端 | `_e2e_interaction_flows.py` 等 | ✅ |
+| 第三层 | 视觉回归基线（像素比对） | `tests/visual/test_visual_regression.py` | ✅ |
+| 第四层 | 响应式布局（无横向溢出） | 同上 `--responsive` | ✅ |
+
+### 14.2 第三层：视觉回归基线
+
+**实施**：`tests/visual/test_visual_regression.py` + `diff_lib.py`（自实现 Pillow 像素比对，单像素阈值 8、累计差异阈值 0.5%，超阈值落盘红色高亮 diff 图）。
+
+**基线清单**（6 张，存于 `tests/visual/__screenshots__/`，已入库）：
+
+| 编号 | 页面 | 命令 |
+|------|------|------|
+| 01 | 长文模式默认 | `goto / → 800ms` |
+| 02 | 短文 - 用例库 | `goto /#/shortform → 用例库 Tab` |
+| 03 | 短文 - 运行台 | `goto /#/shortform → 运行台 Tab` |
+| 04 | 短文 - 监控面板 | `goto /#/shortform → 监控 Tab` |
+| 05 | 桥接 - 会话列表 | `goto /#/bridge` |
+| 06 | 桥接 - 新建会话模态框 | `goto /#/bridge → 点击新建` |
+
+**稳定化策略**（避免无意义像素抖动）：
+- 截图前注入全局 CSS：`animation-duration:0 / transition-duration:0 / caret-color:transparent`
+- 遮罩动态时间戳：`[data-dynamic-time], .timestamp, .sf-time, .time-ago` 文本替换为 `——`
+- `playwright screenshot(animations="disabled", full_page=True)`
+
+**首跑结果**（2026-06-02）：6/6 基线生成 PASS，二次 verify 6/6 比对 PASS（5 张 `identical`、1 张 `0.18%` 在容差内）。证明截图可复现、稳定化策略有效。
+
+**派生产物**（gitignore 已配置）：`__current__/` / `__diff__/` / `__screenshots__/responsive/` / `*.diff.png` 全部不入库，仅基线 6 张 PNG 进 git。
+
+### 14.3 第四层：响应式布局检查
+
+**实施**：同脚本 `--responsive` 开关，参数化 `(768×1024)` 和 `(1920×1080)` 两组 viewport，对三模式各导航一次，做 `documentElement.scrollWidth ≤ window.innerWidth + 1` 断言。独立命名 `resp_<mode>_w<width>.png` 存档参考截图，**不参与基线比对、不污染 1440 主基线**。
+
+**首跑结果**（6 项）：
+
+| viewport | longform | shortform | bridge |
+|----------|----------|-----------|--------|
+| 768×1024 | ~~❌ FAIL（scrollWidth=913）~~ → ✅ **已修复** | ✅ | ✅ |
+| 1920×1080 | ✅ | ✅ | ✅ |
+
+**真实缺陷检出（非测试 bug）**：长文模式 768px 下顶部 `.header-right` 撑到 271px，加上 `chat-top-tools`（200px，含 `btn-toggle-compare` / `btn-new-chat` / `togglePanelBtn`）总计 913px，超 viewport 145px。短文/桥接的容器布局已自适应，长文沿用旧 v5.x header 结构未做窄屏适配。~~按 PRD 桌面优先策略，列入 v6.x 跟踪不阻塞 GA。~~
+
+**修复方案（2026-06-02）**：在 `server/static/css/main.css` 的 `@media(max-width:768px)` 块内追加：
+```css
+.workspace-header {
+  flex-wrap: wrap;      /* 允许 header-left/right 换行 */
+  height: auto;
+  min-height: var(--header-height);
+  padding: 8px 12px;
+  gap: 8px;
+}
+.header-model-shell {
+  min-width: 0;         /* 解除 240px 最小宽锁 */
+}
+```
+**验证结果**：12/12 PASS（6 张 1440 基线零破坏 + 6 项响应式全过，`longform_w768` 从 FAIL → PASS）。
+
+### 14.4 综合通过率
+
+| 层级 | 用例总数 | PASS | FAIL | 备注 |
+|------|---------|------|------|------|
+| 第一层（渲染） | E 组扩展（含原 11） | 全 PASS | 0 | Canvas 非空 / 表格真填 / 模态框生命周期 / Console 零容忍 |
+| 第二层（交互） | 4 流程 | 全 PASS | 0 | A/B 对比 / 桥接会话 / 监控轮询 / 模式持久化 |
+| 第三层（视觉） | 6 页面 | 6 | 0 | 同环境 verify 6/6 PASS（5 identical + 1 within 0.28% tol） |
+| 第四层（响应式） | 6 项 | 6 | 0 | **longform 768px 溢出已修复**（main.css 媒体查询 flex-wrap） |
+
+### 14.5 运行命令速查
+
+```bash
+# 第一层：渲染正确性（连 8000 真实 server）
+py _e2e_d11_verify.py
+
+# 第二层：交互流程（连 8001 隔离 server，需先启 _e2e_isolated_server.py + seed）
+py _e2e_interaction_flows.py
+py _e2e_mode_switch_persist.py
+
+# 第三层：视觉回归（脚本自动起停隔离 server）
+py tests/visual/test_visual_regression.py --update     # 首次/UI 改动后刷新基线
+py tests/visual/test_visual_regression.py              # 验证比对
+
+# 第四层：附加响应式检查
+py tests/visual/test_visual_regression.py --responsive
+```
+
+### 14.6 已知限制与后续
+
+- 字体渲染跨 OS 差异：当前基线在本机 Chromium 148 + Windows 字体下生成，CI 环境需固定 Docker 镜像（`mcr.microsoft.com/playwright:v1.60.0-focal` 或同类）后再次重建基线。
+- Canvas 雷达图基线波动：02-03 截图未触发实际 benchmark 运行，雷达图区域为占位空状态，规避了随机数据抖动。如后续需对真实雷达图截图，应 mock 固定数据集再 `--update`。
+- 长文 768px 溢出修复：建议 `.header-right` 在 `@media (max-width: 900px)` 下折叠为汉堡菜单，或 `togglePanelBtn` 在窄屏隐藏（侧栏改默认折叠）。属产品/前端任务，不在 UI 测试范围。
 
 

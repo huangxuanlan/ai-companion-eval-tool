@@ -3284,6 +3284,28 @@ button.score-evidence-item {
 }
 
 @media(max-width:768px) {
+  .workspace-header {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--header-height);
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .header-left,
+  .header-right {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-model-shell {
+    min-width: 0;
+  }
+
+  #chat-top-tools {
+    flex-wrap: wrap;
+  }
+
   .sidebar {
     width: var(--sidebar-collapsed)
   }
