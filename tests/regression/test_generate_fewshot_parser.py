@@ -4,8 +4,9 @@ from generate import get_fewshot_messages, parse_fewshot_library
 
 
 def test_parse_default_fewshot_library_routes_personal_types() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
     library = parse_fewshot_library(
-        Path(__file__).parent / "few_shot" / "长文模式_Few-shot示例库.md"
+        repo_root / "few_shot" / "长文模式_Few-shot示例库.md"
     )
 
     expected_types = {"霸道腹黑", "理性沉稳", "温暖陪伴", "可爱活泼"}
