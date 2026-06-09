@@ -219,3 +219,8 @@ function handleHashRouting() {
 document.addEventListener('DOMContentLoaded', () => {
   handleHashRouting();
 });
+
+// 监听浏览器前进/后退按钮触发的 hash 变化
+window.addEventListener('hashchange', () => {
+  handleHashRouting();
+});

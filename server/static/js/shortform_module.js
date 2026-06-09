@@ -437,8 +437,8 @@
       });
       const run = await res.json();
       
-      if (res.ok && run.run_id) {
-        activeRunId = run.run_id;
+      if (res.ok && run.id) {
+        activeRunId = run.id;
         window.switchShortformTab('monitor');
         startMonitorPolling(activeRunId);
       } else {
@@ -906,8 +906,8 @@
       });
       const run = await res.json();
       
-      if (res.ok && run.run_id) {
-        activeBenchRunId = run.run_id;
+      if (res.ok && run.id) {
+        activeBenchRunId = run.id;
         startBenchmarkPolling(activeBenchRunId);
       } else {
         alert(`创建基准任务失败: ${run.detail || '未知原因'}`);

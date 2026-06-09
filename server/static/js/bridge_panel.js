@@ -187,10 +187,11 @@
       const session = await res.json();
       
       // 更新元数据统计
-      const fromLabel = session.from_mode === 'shortform' ? '短文' : '长文';
-      const toLabel = session.to_mode === 'shortform' ? '短文' : '长文';
+      const basic = session.basic || {};
+      const fromLabel = basic.from_mode === 'shortform' ? '短文' : '长文';
+      const toLabel = basic.to_mode === 'shortform' ? '短文' : '长文';
       document.getElementById('bridge-meta-stats').textContent = 
-        `源会话: ${session.source_conversation_id} | 模式: ${fromLabel} → ${toLabel} | 目标模型: ${session.target_model || '默认'}`;
+        `源会话: ${basic.source_conversation_id} | 模式: ${fromLabel} → ${toLabel} | 目标模型: ${basic.target_model || '默认'}`;
       
       // 加载源历史对话
       loadSourceHistory(session);
@@ -223,7 +224,8 @@
     if (!historyContainer) return;
     
     // 如果已有拉取的数据，直接渲染
-    const sourceConvId = session.source_conversation_id;
+    const basic = session.basic || {};
+    const sourceConvId = basic.source_conversation_id;
     try {
       // 强制绕过 mode 拦截以获取该特定 conversation 的 turns
       const res = await fetch(`/api/conversations/${sourceConvId}`);
@@ -246,7 +248,7 @@
             <span>${escapeHtml(t.user_input)}</span>
           </div>
           <div class="bridge-chat-bubble assistant">
-            <span style="font-weight:600;font-size:11px;opacity:0.8">${escapeHtml(session.target_model || 'AI')}</span>
+            <span style="font-weight:600;font-size:11px;opacity:0.8">${escapeHtml(basic.target_model || 'AI')}</span>
             <span>${escapeHtml(t.ai_output)}</span>
           </div>
         `;
@@ -293,7 +295,8 @@
       fallbackTip.style.display = 'none';
       if (summaryTimerId) clearInterval(summaryTimerId);
       
-      document.getElementById('bridge-summary-text').value = session.switch_summary || '*(未生成切换摘要)*';
+      const summaryObj = session.summary || {};
+      document.getElementById('bridge-summary-text').value = summaryObj.switch_summary || '*(未生成切换摘要)*';
       
       if (session.status === 'pending_first_response') {
         renderFirstResponseForm();
@@ -392,7 +395,7 @@
     
     // 首轮回复结果在数据库中的存储形式，可以通过 conversations API 读取
     // 我们再次发起请求读取 target_conversation 的首轮 AI 回复以直接展现内容与评分
-    const targetConvId = session.target_conversation_id;
+    const targetConvId = (session.basic || {}).target_conversation_id;
     if (!targetConvId) {
       outputBox.textContent = '首轮回复暂未生成。';
       return;
@@ -545,8 +548,8 @@
       });
       const data = await res.json();
       
-      if (res.ok && data.run_id) {
-        startBatchPoll(data.run_id);
+      if (res.ok && data.id) {
+        startBatchPoll(data.id);
       } else {
         if (statusText) statusText.textContent = `失败: ${data.detail || '未知原因'}`;
       }
