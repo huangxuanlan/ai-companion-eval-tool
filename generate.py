@@ -33,6 +33,10 @@ from pathlib import Path
 import httpx
 import pandas as pd
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 # ═══════════════════════════════════════════════════════════════════
 # 常量
 # ═══════════════════════════════════════════════════════════════════
@@ -53,10 +57,10 @@ SEPARATOR_CONTENT = (
 
 CORE_CONSTRAINTS = (
     "<Core_Constraints>\n"
-    "- 长度：600-800字完整叙事\n"
-    "- 格式：旁白用*包裹，对白用「」包裹\n"
-    "- 结尾：必须包含引导性钩子，禁止封闭式问句\n"
-    "- 人设：使用锚点词，禁用禁用词\n"
+    "- 长度：300-500字完整叙事\n"
+    "- 格式：每句旁白独立用中文括号（）包裹，对白为纯文本不加括号\n"
+    "- 结尾：让用户想回一条消息（未完成动作/可接话的对白/自然征询）\n"
+    "- 段落：所有段落之间统一双换行分隔\n"
     "</Core_Constraints>"
 )
 
@@ -100,37 +104,76 @@ def parse_fewshot_library(fewshot_path: Path) -> dict[str, list[dict]]:
     text = fewshot_path.read_text(encoding="utf-8")
     result: dict[str, list[dict]] = {}
 
-    # 按性格类型分节: ## 温暖陪伴型 / ## 霸道腹黑型 / ## 可爱活泼型 / ## 理性沉稳型
-    type_pattern = re.compile(r"^## (.+?)型\s*$", re.MULTILINE)
-    type_matches = list(type_pattern.finditer(text))
+    def normalize_type_heading(heading: str) -> str | None:
+        heading = heading.strip()
+        if heading.startswith("【"):
+            return None
+        match = re.search(r"(.+?型)", heading)
+        if not match:
+            return None
+        return match.group(1).replace("型", "").strip()
 
-    for i, m in enumerate(type_matches):
-        type_name = m.group(1).strip()  # e.g. "温暖陪伴"
+    def extract_pairs(section: str) -> list[dict]:
+        label_pattern = re.compile(
+            r"^\s*(?:\*\*)?(?P<label>\[User\]|\[Assistant\]|用户说|你的回复)"
+            r"(?:\*\*)?\s*[：:]?\s*(?P<inline>.*)$"
+        )
+        examples: list[dict] = []
+        current_label: str | None = None
+        current_lines: list[str] = []
+        pending_user: str | None = None
+
+        def flush_current() -> None:
+            nonlocal current_label, current_lines, pending_user
+            if not current_label:
+                return
+            content = "\n".join(current_lines).strip()
+            if current_label == "user":
+                pending_user = content
+            elif current_label == "assistant" and pending_user and content:
+                examples.append({"user": pending_user, "assistant": content})
+                pending_user = None
+            current_label = None
+            current_lines = []
+
+        for line in section.splitlines():
+            label_match = label_pattern.match(line)
+            if label_match:
+                flush_current()
+                label = label_match.group("label")
+                current_label = "user" if label in ("[User]", "用户说") else "assistant"
+                inline = label_match.group("inline").strip()
+                current_lines = [inline] if inline else []
+                continue
+
+            if current_label and (
+                re.match(r"^\s*---\s*$", line) or re.match(r"^#{1,3}\s+", line)
+            ):
+                flush_current()
+                continue
+
+            if current_label:
+                current_lines.append(line)
+
+        flush_current()
+        return examples
+
+    # 兼容旧格式 `## 温暖陪伴型` 与当前格式 `# 霸道腹黑型 · 男性 · ...`。
+    heading_pattern = re.compile(r"^#{1,3}\s+(.+?)\s*$", re.MULTILINE)
+    type_matches = [
+        (match, type_name)
+        for match in heading_pattern.finditer(text)
+        if (type_name := normalize_type_heading(match.group(1)))
+    ]
+
+    for i, (m, type_name) in enumerate(type_matches):
         start = m.end()
-        end = type_matches[i + 1].start() if i + 1 < len(type_matches) else len(text)
+        end = type_matches[i + 1][0].start() if i + 1 < len(type_matches) else len(text)
         section = text[start:end]
 
-        # 提取每个 [User] / [Assistant] 对
-        examples = []
-        # 分割示例：按 ### 示例
-        example_blocks = re.split(r"###\s+示例\s+\d+", section)
-        for block in example_blocks:
-            if not block.strip():
-                continue
-            user_match = re.search(
-                r"\*\*\[User\]\*\*:\s*(.+?)(?=\n\n\*\*\[Assistant\]\*\*:)",
-                block, re.DOTALL
-            )
-            asst_match = re.search(
-                r"\*\*\[Assistant\]\*\*:\s*\n\n(.+?)(?=\n---|\Z)",
-                block, re.DOTALL
-            )
-            if user_match and asst_match:
-                examples.append({
-                    "user": user_match.group(1).strip(),
-                    "assistant": asst_match.group(1).strip(),
-                })
-        result[type_name] = examples
+        examples = extract_pairs(section)
+        if examples:
+            result.setdefault(type_name, []).extend(examples)
 
     return result
 
