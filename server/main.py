@@ -12,6 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 SERVER_DIR = Path(__file__).resolve().parent
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
 if __package__:
     from . import config as _config
     sys.modules.setdefault("config", _config)
